@@ -1,4 +1,4 @@
-# Colab NLP Templates
+# Colab NLP Utilities
 
 このリポジトリは、**Google Colaboratory 上で自然言語処理（NLP）を学ぶための関数・解説ドキュメント**をまとめた教材用リポジトリです。
 
