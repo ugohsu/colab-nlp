@@ -4,58 +4,79 @@
 
 ---
 
+## ライブラリインポートの手順
+
+本リポジトリで提供されている関数を使用するための基本的な手順は次のとおりです。
+
+---
+
+### 1. リポジトリを clone
+
+```python
+!git clone https://github.com/ugohsu/colab-nlp.git
+```
+
+### 2. import 用のパスを追加
+
+```python
+import sys
+sys.path.append("/content/colab-nlp")
+```
+
+### 3. 関数を import (例)
+
+```python
+from colab_nlp import tokenize_df
+```
+
+---
+
+データの入出力などに関する関数は、[colab-common](https://github.com/ugohsu/colab-common.git) リポジトリで提供されています。両リポジトリを導入する場合は、以下のような記述をおこない、セルを実行するとよいでしょう。
+
+```python
+## パス設定のために必要
+import sys
+
+## colab-common
+!git clone https://github.com/ugohsu/colab-common.git
+sys.path.append("/content/colab-common")
+
+## colab-nlp
+!git clone https://github.com/ugohsu/colab-nlp.git
+sys.path.append("/content/colab-nlp")
+```
+
+---
+
+### 注意（Google Colab での git clone）
+
+同一ノートブック内で同一リポジトリに対する `git clone` を **2 回以上実行しないでください**。
+
+```
+fatal: destination path 'colab-common' already exists
+```
+
+というエラーが発生し、そのセルでは、当該行以降のコードが実行されなくなります。
+
+---
+
 ## 関数一覧（import して使う）
 
 | 分類 | 内容 | 実装ファイル | 解説ドキュメント |
 |---|---|---|---|
-| I/O | フォルダ配下のテキスト→DataFrame（build_text_df） | [`colab_nlp/io_text.py`](./colab_nlp/io_text.py) | [`docs/io_text_basic.md`](./docs/io_text_basic.md) |
-| I/O | Google Sheets 書き込み | [`colab_nlp/gsheet_io.py`](./colab_nlp/gsheet_io.py) | [`docs/write_google_spreadsheet.md`](./docs/write_google_spreadsheet.md) |
+| I/O | フォルダ配下のテキスト→DataFrame（build_text_df） | [`colab_nlp/io_text.py`](./colab_nlp/io_text.py) | -- |
 | 前処理 | 形態素解析（Janome / SudachiPy：tokenize_df） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
 | BoW / 可視化 | 語頻度・WordCloud | [`colab_nlp/bow.py`](./colab_nlp/bow.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 
-## ドキュメント一覧
-
-BOW/README.md も忘れないように
-
 ---
 
-## 関数群（colab_nlp）の基本的な使い方
+## ドキュメント一覧
 
-以下のコードを実行することで、本リポジトリで提供されている関数をインポートできるようになります。
+| 分類 | 内容 | ドキュメント |
+|---|---|---|
+|前処理|`tokenization.md`||
 
-```python
-!git clone https://github.com/ugohsu/colab-nlp-templates.git
-
-import sys
-sys.path.append("/content/colab-nlp-templates")
-```
-
-> ⚠️ **注意（Google Colab での git clone）**  
-> 上記の `git clone` は **最初の1回だけ実行してください**。  
-> 同じノートブックで 2 回以上実行すると、
->
-> ```
-> fatal: destination path 'colab-nlp-templates' already exists
-> ```
->
-> というエラーが出ます。当該セルで fatal を出した行以降のコードは実行されません。
-
-具体的な関数をインポートする際には、以下のように指示します（例）。
-
-```python
-from colab_nlp import (
-    tokenize_df,
-    build_text_df,
-    tokens_to_text,
-    create_wordcloud,
-    write_df_to_gsheet,
-)
-
-```
-
-※ 各関数に必要な外部ライブラリの install 方法や  
-　事前に実行すべきテンプレートについては、  
-　**対応する docs を必ず参照してください。**
+BOW/README.md も忘れないように
 
 ---
 

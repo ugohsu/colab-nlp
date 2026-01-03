@@ -154,7 +154,7 @@ df_tok_1 = filter_tokens_df(df_tok_all, pos_exclude={"補助記号", "空白"})
 df_tok_2 = filter_tokens_df(df_tok_1, pos_exclude={"助詞"})
 
 # stopword も落とせる
-top10words = df_tok_2["word"].value_count().head(10) # 出現頻度上位10単語をストップワードとして認定
+top10words = df_tok_2["word"].value_counts().head(10) # 出現頻度上位10単語をストップワードとして認定
 df_tok_3 = filter_tokens_df(df_tok_2, stopwords=(top10words, "いる", "ある"))
 ```
 
