@@ -63,7 +63,7 @@ print(font_path)
 tokens_to_text(
     df,
     *,
-    id_col="article_id",
+    id_col="doc_id",
     word_col="word",
     sep=" ",
     pos_keep=None,
@@ -89,7 +89,7 @@ WordCloud に渡す用途では、**デフォルト（`per_doc=False`）のま�
 
 - `id_col`（任意）  
   文書ID列名（`per_doc=True` のときに使用）  
-  - 既定：`"article_id"`
+  - 既定：`"doc_id"`
 
 - `word_col`（任意）  
   トークン列名（結合対象）  

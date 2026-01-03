@@ -11,7 +11,7 @@
 入力は、すでに形態素解析が完了した DataFrame です。  
 最低限、次の列を含んでいる必要があります。
 
-- `article_id`：文書ID（同じ文書に属するトークンをまとめるために使う）
+- `doc_id`：文書ID（同じ文書に属するトークンをまとめるために使う）
 - `word`：トークン（頻度を数える対象）
 - `pos`：品詞（大分類。名詞だけ数える、などのフィルタに使う）
 
@@ -139,15 +139,15 @@ tokens DataFrame から、
 ```python
 docs_tokens = (
     tokens
-    .groupby("article_id")["word"]
+    .groupby("doc_id")["word"]
     .apply(list)
 )
 ```
 
 #### 行ごとの説明
 
-**`tokens.groupby("article_id")`（必須）**
-- `article_id` が同じ行（＝同じ文書）をひとまとめにする操作です。
+**`tokens.groupby("doc_id")`（必須）**
+- `doc_id` が同じ行（＝同じ文書）をひとまとめにする操作です。
 - これにより、「文書ごとのトークン列」を作れます。
 
 **`["word"]`**
@@ -159,7 +159,7 @@ docs_tokens = (
 
 #### 出力の型（重要）
 - `docs_tokens` は **pandas.Series** です。
-  - index：`article_id`
+  - index：`doc_id`
   - value：`list[str]`（トークンのリスト）
 
 ---
