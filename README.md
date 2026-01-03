@@ -62,40 +62,45 @@ fatal: destination path 'colab-common' already exists
 
 ## 関数一覧（import して使う）
 
-| 分類 | 内容 | 実装ファイル | 解説ドキュメント |
-|---|---|---|---|
-| I/O | フォルダ配下のテキスト→DataFrame（build_text_df） | [`colab_nlp/io_text.py`](./colab_nlp/io_text.py) | -- |
-| 前処理 | 形態素解析（Janome / SudachiPy：tokenize_df） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
-| BoW / 可視化 | 語頻度・WordCloud | [`colab_nlp/bow.py`](./colab_nlp/bow.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
+| 分類 | 関数名 | 内容 | 実装ファイル | 解説ドキュメント |
+| :--- | :--- | :--- | :--- | :--- |
+| **I/O** | `build_text_df` | フォルダ内のテキストをまとめて読み込みDataFrameを作成 | [`colab_nlp/io_text.py`](./colab_nlp/io_text.py) | [`docs/io_text_basic.md`](./docs/io_text_basic.md) |
+| **前処理** | `tokenize_df` | 文書DFを形態素解析し、縦持ち（1行1語）形式に変換 | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
+| **前処理** | `tokenize_text_janome` | Janomeを用いて1つの文字列をトークン化（内部・単体用） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
+| **前処理** | `tokenize_text_sudachi` | Sudachiを用いて1つの文字列をトークン化（内部・単体用） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
+| **前処理** | `filter_tokens_df` | トークンDFから特定の品詞やストップワードを除外・抽出 | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
+| **前処理** | `tokens_to_text` | トークンDFを分かち書きテキスト（文字列）に再結合 | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
+| **BoW / 可視化** | `create_wordcloud` | 分かち書きテキストからWordCloud画像を生成・表示 | [`colab_nlp/bow.py`](./colab_nlp/bow.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 
 ---
 
 ## ドキュメント一覧
 
 | 分類 | 内容 | ドキュメント |
-|---|---|---|
-|前処理|`tokenization.md`||
-
-BOW/README.md も忘れないように
+| :--- | :--- | :--- |
+| **前処理** | Janome / SudachiPy による形態素解析とDataFrame化 | [`docs/tokenization.md`](./docs/tokenization.md) |
+| **前処理** | Sudachi ユーザー辞書の作成・設定方法 | [`docs/Sudachi_user_dict.md`](./docs/Sudachi_user_dict.md) |
+| **BoW** | Bag of Words（BoW）の概念と位置づけ（総論） | [`docs/bow/README.md`](./docs/bow/README.md) |
+| **BoW** | 語頻度（Term Frequency）の集計方法 | [`docs/bow/term_frequency.md`](./docs/bow/term_frequency.md) |
+| **BoW / 可視化** | WordCloud による可視化 | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 
 ---
 
 ## このリポジトリで学ぶ NLP の全体像
 
-本リポジトリでは、**データの読み込み方法**から始め、  
-前処理 → Bag of Words → 可視化・出力という  
-**日本語 NLP 分析パイプライン**を段階的に学びます。
+本リポジトリでは、データの準備から前処理、分析、可視化までの **日本語 NLP 分析パイプライン** を段階的に学びます。
 
 ### 1. テキストデータの取得
 
-- スプレッドシートによる読み込み
-    - Google スプレッドシートをテキストの入力データとして使用します ([`docs/load_google_spreadsheet.md`](./docs/load_google_spreadsheet.md))。
-    - pandas データフレーム形式で読み込みます。基本的にはどのような表形式でも扱えますが、このプロジェクトでは、id 列と文書列を持つ表の読み込みを想定しています。
-    - 少量の文書を手軽に扱え、前処理や分析結果の確認に向いています。
-- プレーンテキストの読み込み
-    - Google ドライブのマウント方法やファイルの読み込み方法について、[`docs/io_text_basic.md`](./docs/io_text_basic.md) にまとめています。
-    - スプレッドシート読み書きラッパーよりも基礎的な方法であり、大規模データの処理などの発展的な内容に応用しやすいです。
-    - 文書数が多い場合は、フォルダ配下の `.txt` をまとめて読み込み、(id 列 + 文書列) 形式の DataFrame を自動生成する `build_text_df` を利用できます。
+データの読み込みに関する基本的な機能は、共通ライブラリ **[colab-common](https://github.com/ugohsu/colab-common)** に集約しています。
+
+- **基本的な読み込み（colab-common）**
+    - テキストファイルの読み込み、Google スプレッドシートや SQLite との連携については、`colab-common` のドキュメント・関数を使用してください。
+    - 分析の第一歩として、手持ちのデータを `pandas.DataFrame`（`doc_id` 列と `text` 列を持つ形式）に読み込むことを目指します。
+
+- **フォルダの一括読み込み（build_text_df）**
+    - 本リポジトリ（`colab-nlp`）では、NLP 分析の前段階として「フォルダ配下の大量のテキストファイルを一括で読み込む」ための関数 `build_text_df` を提供しています。
+    - 多数のファイルからなる文書集合を、分析用 DataFrame へ素早く変換する場合に使用します。
 
 ---
 
@@ -103,14 +108,11 @@ BOW/README.md も忘れないように
 
 - 内容
     - 日本語テキストの形態素解析
-        - 日本語文を単語（トークン）に分割し、  
-        「**1行 = 1トークン**」の縦持ち DataFrame に変換します。
-        - Janome（軽量・授業向け）と SudachiPy（高精度・研究向け）の  
-        2 種類の形態素解析器に対応しています。
+        - 日本語文を単語（トークン）に分割し、「**1行 = 1トークン**」の縦持ち DataFrame に変換します。
+        - Janome（軽量・授業向け）と SudachiPy（高精度・研究向け）の 2 種類の形態素解析器に対応しています。
         - 解析結果は、語・品詞・付加情報（token_info）を列として保持します。
     - 分析パイプラインの基盤
-        - 以降の BoW、語頻度分析、WordCloud などは、  
-        この形態素解析結果を前提として進みます。
+        - 以降の BoW、語頻度分析、WordCloud などは、この形態素解析結果を前提として進みます。
         - 小規模データから研究用途まで、同じ形式で扱える設計です。
 - 参考資料
     - [`docs/tokenization.md`](./docs/tokenization.md)
@@ -121,42 +123,35 @@ BOW/README.md も忘れないように
 
 - 内容
     - BoW の考え方と位置づけ
-        - 文書を「単語の集合」として表現し、  
-        出現頻度や分布にもとづいて文章を数値化します。
+        - 文書を「単語の集合」として表現し、出現頻度や分布にもとづいて文章を数値化します。
         - 日本語 NLP の基礎となる表現方法です。
     - 基本的な分析と可視化
-        - 単語の出現頻度を集計し、  
-        文書全体やコーパス全体の特徴を把握します。
-        - WordCloud による可視化で、  
-        テキストの傾向を直感的に確認できます。
+        - 単語の出現頻度を集計し、文書全体やコーパス全体の特徴を把握します。
+        - WordCloud による可視化で、テキストの傾向を直感的に確認できます。
     - 教育・演習向けの最小構成
-        - pandas ベースの実装で、  
-        処理の流れを追いやすい構成になっています。
+        - pandas ベースの実装で、処理の流れを追いやすい構成になっています。
 - 参考資料
     - BoW 総論・位置づけ
         - [`docs/bow/README.md`](./docs/bow/README.md)
-    - 語頻度分析（最小構成
+    - 語頻度分析（最小構成）
         - [`docs/bow/term_frequency.md`](./docs/bow/term_frequency.md)
     - WordCloud による可視化
         - [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md)
 
 ---
 
-### 4. 出力・共有
+### 4. 出力・共有・保存
 
 - 内容
-    - 分析結果の書き戻し
-        - 形態素解析結果や BoW の集計結果を、  
-        pandas DataFrame として扱います。
-        - DataFrame を Google スプレッドシートへ  
-        書き戻すための関数を用意しています。
-    - 共有・配布を前提とした設計
-        - スプレッドシート形式で出力することで、  
-        結果の確認・共有・再利用が容易になります。
-        - 授業での配布、レポート作成、  
-        二次分析への接続を想定しています。
+    - 分析結果の出力
+        - 形態素解析結果や BoW の集計結果を `colab-common` の機能を用いて出力・保存します。
+        - **Google スプレッドシート** へ書き戻すことで、結果の共有や可視化が容易になります。
+        - **SQLite データベース** へ保存することで、大規模なデータを効率的に管理し、SQL を用いた柔軟な検索や再利用が可能になります。
+    - 二次利用を見据えた設計
+        - 授業での配布やレポート作成だけでなく、SQL を活用した高度な二次分析への接続も想定しています。
 - 参考資料
-    - [`docs/write_google_spreadsheet.md`](./docs/write_google_spreadsheet.md)
+    - [colab-common: Google スプレッドシートの入出力](https://github.com/ugohsu/colab-common/blob/main/docs/gsheet_io.md)
+    - [colab-common: データベース入出力（SQLite / SQL 基礎）](https://github.com/ugohsu/colab-common/blob/main/docs/io_sql_basic.md)
 
 ---
 
