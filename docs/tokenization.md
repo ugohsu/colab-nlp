@@ -31,7 +31,7 @@ Janome と SudachiPy を **同時にインストールする必要はありま�
 
 ```python
 !pip install janome
-from libs import tokenize_df
+from colab_nlp import tokenize_df
 ```
 
 ---
@@ -40,7 +40,7 @@ from libs import tokenize_df
 
 ```python
 !pip install sudachipy sudachidict_core
-from libs import tokenize_df
+from colab_nlp import tokenize_df
 ```
 
 ---
@@ -145,7 +145,7 @@ df_tok_all["word"].value_counts().head(20)
 ## Step 3：あとから filter していく（段階的に落とす）
 
 ```python
-from libs.preprocess import filter_tokens_df
+from colab_nlp import filter_tokens_df
 
 # まずは記号や空白だけ落とす
 df_tok_1 = filter_tokens_df(df_tok_all, pos_exclude={"補助記号", "空白"})
@@ -631,8 +631,8 @@ tokenize_text_sudachi(
 
 ```python
 from sudachipy import dictionary
-from libs import tokenize_df
-from libs.preprocess import tokenize_text_sudachi
+from colab_nlp import tokenize_df
+from colab_nlp import tokenize_text_sudachi
 
 tok = dictionary.Dictionary().create()
 
@@ -658,8 +658,8 @@ df_tok = tokenize_df(
 
 ```python
 from sudachipy import dictionary
-from libs import tokenize_df
-from libs.preprocess import tokenize_text_sudachi
+from colab_nlp import tokenize_df
+from colab_nlp import tokenize_text_sudachi
 
 tok = dictionary.Dictionary().create()
 
@@ -780,7 +780,7 @@ Janome では、CSV 形式のユーザー辞書を指定して Tokenizer を作�
 
 ```python
 from janome.tokenizer import Tokenizer
-from libs import tokenize_df
+from colab_nlp import tokenize_df
 
 # 1. ユーザー辞書を指定して Tokenizer を作成
 my_tokenizer = Tokenizer(
@@ -805,7 +805,7 @@ SudachiPy では、ユーザー辞書や正規化設定を
 
 ```python
 from sudachipy import dictionary
-from libs import tokenize_df
+from colab_nlp import tokenize_df
 
 my_tokenizer = dictionary.Dictionary(
     config_path="path/to/sudachi.json"
@@ -826,7 +826,7 @@ Sudachi のユーザー辞書の作成方法については、[公式ドキュ�
 
 ```python
 from sudachipy import dictionary
-from libs import tokenize_df, tokenize_text_sudachi
+from colab_nlp import tokenize_df, tokenize_text_sudachi
 
 tokenizer = dictionary.Dictionary(
     config_path="path/to/sudachi.json"

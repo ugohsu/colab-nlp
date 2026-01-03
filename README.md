@@ -8,10 +8,10 @@
 
 | 分類 | 内容 | 実装ファイル | 解説ドキュメント |
 |---|---|---|---|
-| I/O | フォルダ配下のテキスト→DataFrame（build_text_df） | [`libs/io_text.py`](./libs/io_text.py) | [`docs/io_text_basic.md`](./docs/io_text_basic.md) |
-| I/O | Google Sheets 書き込み | [`libs/gsheet_io.py`](./libs/gsheet_io.py) | [`docs/write_google_spreadsheet.md`](./docs/write_google_spreadsheet.md) |
-| 前処理 | 形態素解析（Janome / SudachiPy：tokenize_df） | [`libs/preprocess.py`](./libs/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
-| BoW / 可視化 | 語頻度・WordCloud | [`libs/bow.py`](./libs/bow.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
+| I/O | フォルダ配下のテキスト→DataFrame（build_text_df） | [`colab_nlp/io_text.py`](./colab_nlp/io_text.py) | [`docs/io_text_basic.md`](./docs/io_text_basic.md) |
+| I/O | Google Sheets 書き込み | [`colab_nlp/gsheet_io.py`](./colab_nlp/gsheet_io.py) | [`docs/write_google_spreadsheet.md`](./docs/write_google_spreadsheet.md) |
+| 前処理 | 形態素解析（Janome / SudachiPy：tokenize_df） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
+| BoW / 可視化 | 語頻度・WordCloud | [`colab_nlp/bow.py`](./colab_nlp/bow.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 
 ## ドキュメント一覧
 
@@ -19,7 +19,7 @@ BOW/README.md も忘れないように
 
 ---
 
-## 関数群（libs）の基本的な使い方
+## 関数群（colab_nlp）の基本的な使い方
 
 以下のコードを実行することで、本リポジトリで提供されている関数をインポートできるようになります。
 
@@ -43,7 +43,7 @@ sys.path.append("/content/colab-nlp-templates")
 具体的な関数をインポートする際には、以下のように指示します（例）。
 
 ```python
-from libs import (
+from colab_nlp import (
     tokenize_df,
     build_text_df,
     tokens_to_text,
