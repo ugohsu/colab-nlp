@@ -1,7 +1,7 @@
 # WordCloud を作成する（Bag of Words 可視化）
 
 本ドキュメントでは、本リポジトリの  
-[`libs/bow.py`](../../libs/bow.py)  
+[`colab_nlp/bow.py`](../../colab_nlp/bow.py)  
 で提供している **WordCloud 作成用ユーティリティ**について説明します。
 
 WordCloud は、形態素解析後の **Bag of Words（BoW）表現**を可視化する代表的な手法であり、  
@@ -15,7 +15,7 @@ WordCloud は、形態素解析後の **Bag of Words（BoW）表現**を可視�
 
 ```python
 !pip install wordcloud
-from libs import tokens_to_text, create_wordcloud
+from colab_nlp import tokens_to_text, create_wordcloud
 ```
 
 ---
