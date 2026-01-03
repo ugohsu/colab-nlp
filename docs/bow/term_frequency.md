@@ -1,15 +1,12 @@
 # 語頻度（Term Frequency）
 
-本ドキュメントでは、形態素解析済みの **tokens DataFrame**  
-（「1行 = 1トークン」の縦持ち形式）から、  
-**語頻度（単語 × 出現回数）** を求める「最小構成」を示します。
+本ドキュメントでは、形態素解析済みの **tokens DataFrame**（「1行 = 1トークン」の縦持ち形式）から、**語頻度（単語 × 出現回数）** を求める「最小構成」を示します。
 
 ---
 
 ## 前提：入力（tokens DataFrame）
 
-入力は、すでに形態素解析が完了した DataFrame です。  
-最低限、次の列を含んでいる必要があります。
+入力は、すでに形態素解析が完了した DataFrame です。最低限、次の列を含んでいる必要があります。
 
 - `doc_id`：文書ID（同じ文書に属するトークンをまとめるために使う）
 - `word`：トークン（頻度を数える対象）
@@ -17,7 +14,7 @@
 
 形態素解析（tokens の作成方法）は、以下を参照してください。
 
-- 形態素解析（Janome / SudachiPy）：[`../tokenization.md`](../tokenization.md)  
+- 形態素解析（Janome / SudachiPy）：[`../tokenization.md`](../tokenization.md)
 - BoW 章トップ：[`README.md`](README.md)
 
 ---
@@ -30,8 +27,7 @@ import pandas as pd
 
 ### 説明
 - `pandas` は DataFrame 操作の標準ライブラリです。
-- このドキュメントでは、語頻度集計を **pandas / scikit-learn** の両方で行いますが、  
-  どちらの結果も DataFrame / Series で扱うのが自然なので、最初に import しておきます。
+- このドキュメントでは、語頻度集計を **pandas / scikit-learn** の両方で行いますが、どちらの結果も DataFrame / Series で扱うのが自然なので、最初に import しておきます。
 
 ---
 
@@ -121,15 +117,14 @@ freq_df.head()
 
 ## 2. scikit-learn で語頻度（最小・推奨）
 
-ここでは、**sklearn に形態素解析はさせません**。  
-tokens DataFrame から、
+ここでは、**sklearn に形態素解析はさせません**。tokens DataFrame から、
 
 - 文書ごとにトークンの **list**
 - それをそのまま `CountVectorizer` に渡す
 
 という、最も素直な方法を用います。
 
-> 重要：`CountVectorizer` は本来 “文字列（文書）” を受け取りますが、  
+> 重要：`CountVectorizer` は本来 “文字列（文書）” を受け取りますが、
 > 設定を工夫すると「事前トークン化済み入力（list）」をそのまま扱えます。
 
 ---
@@ -169,11 +164,7 @@ docs_tokens = (
 ```python
 from sklearn.feature_extraction.text import CountVectorizer
 
-cv = CountVectorizer(
-    tokenizer=lambda x: x,
-    preprocessor=lambda x: x,
-    token_pattern=None,
-)
+cv = CountVectorizer(analyzer=lambda x: x)
 
 X = cv.fit_transform(docs_tokens)
 vocab = cv.get_feature_names_out()
@@ -186,21 +177,23 @@ vocab = cv.get_feature_names_out()
 
 ---
 
-#### `CountVectorizer(...)` の3つの必須設定
+#### `CountVectorizer(...)` の設定
 
-**`tokenizer=lambda x: x`（必須）**
-- `tokenizer` は本来 “文字列を単語に分割する関数” を指定する場所です。
-- しかし今回はすでに `x` が「トークンの list」なので、  
-  **何もせずそのまま返す**（恒等関数）にします。
+**`analyzer=lambda x: x`**
+- `analyzer` を指定すると、トークナイズ処理全体がここに指定した関数に移譲されます。`lambda x: x` を指定することで、以下の 3 つの引数を指定することと同等の処理をおこないます。
 
-**`preprocessor=lambda x: x`（必須）**
-- `preprocessor` は本来 “文字列の前処理（小文字化など）” をする場所です。
-- 今回は `x` が list なので、ここも **何もせずそのまま返す**にします。
-
-**`token_pattern=None`（必須）**
-- `token_pattern` は “文字列からトークンを拾う正規表現” の設定です。
-- 既定値のままだと、sklearn が「文字列処理モード」だと解釈しようとして混乱します。
-- そこで `None` にして、**正規表現トークナイズを無効化**します。
+> **`tokenizer=lambda x: x`**
+> - `tokenizer` は本来 “文字列を単語に分割する関数” を指定する場所です。
+> - しかし今回はすでに `x` が「トークンの list」なので、**何もせずそのまま返す**（恒等関数）にします。
+> 
+> **`preprocessor=lambda x: x`**
+> - `preprocessor` は本来 “文字列の前処理（小文字化など）” をする場所です。
+> - 今回は `x` が list なので、ここも **何もせずそのまま返す**にします。
+> 
+> **`token_pattern=None`**
+> - `token_pattern` は “文字列からトークンを拾う正規表現” の設定です。
+> - 既定値のままだと、sklearn が「文字列処理モード」だと解釈しようとして混乱します。
+> - そこで `None` にして、**正規表現トークナイズを無効化**します。
 
 ---
 
@@ -272,8 +265,8 @@ tokens = tokens.dropna(subset=["word"])
 
 ## まとめ：pandas と sklearn の使い分け
 
-- **pandas** は “全体の語頻度を素早く見る” のに向いています  
+- **pandas** は “全体の語頻度を素早く見る” のに向いています
   - `value_counts()` が非常に簡潔
 
-- **scikit-learn** は “文書×単語行列（BoW 行列）を作って次の分析へ進む” のに向いています  
+- **scikit-learn** は “文書×単語行列（BoW 行列）を作って次の分析へ進む” のに向いています
   - ただし本教材では、**tokens を出発点**にして sklearn の前処理を最小化します
