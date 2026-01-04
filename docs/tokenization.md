@@ -102,12 +102,12 @@ from colab_nlp import tokenize_df
 
 本ライブラリでは、形態素解析の結果を次のような形で扱います。
 
-| doc_id | word | pos |
-|-----------|------|-----|
-| 1 | 今日 | 名詞 |
-| 1 | 良い | 形容詞 |
-| 1 | 天気 | 名詞 |
-| 1 | だ | 助動詞 |
+| doc_id | token_id | word | pos |
+|---|---|---|---|
+| 1 | 0 | 今日 | 名詞 |
+| 1 | 1 | 良い | 形容詞 |
+| 1 | 2 | 天気 | 名詞 |
+| 1 | 3 | だ | 助動詞 |
 
 このように  
 **「1行 = 1トークン（語）」**  
@@ -201,6 +201,7 @@ tokenize_df(
     *,
     id_col="doc_id",
     text_col="text",
+    token_id_col="token_id",
     engine="janome",
     tokenizer=None,
     tokenize_text_fn=None,
@@ -241,6 +242,14 @@ tokenize_df(
 - 既定：`"text"`
 - 意味：解析対象の本文列名
 - 例：`text_col="text"`
+
+---
+
+### token_id_col
+- 型：`str`
+- 既定：`"token_id"`
+- 意味：文書内でのトークンの出現順序（0始まり）を格納する列名
+- 例：`token_id_col="token_no"`
 
 ---
 
@@ -343,6 +352,7 @@ tokenize_df(
 tokenize_df の出力には次の列が含まれます。
 
 - `id_col`（例：`doc_id`）
+- `token_id` (文書内通し番号。0, 1, 2,...)
 - `word`
 - `pos`
 - `token_info`（extra_col が None のときは作られない／または全て None）

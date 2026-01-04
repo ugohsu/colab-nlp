@@ -326,6 +326,8 @@ def tokenize_df(
         文書ID列名
     text_col : str
         テキスト列名
+    token_id_col : str
+        文書内通し番号の列名
     engine : {"janome","sudachi"}
         形態素解析エンジン（デフォルトは janome）
     tokenizer : optional
