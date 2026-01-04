@@ -301,6 +301,7 @@ def tokenize_df(
     *,
     id_col: str = "doc_id",
     text_col: str = "text",
+    token_id_col: str = "token_id",
     engine: str = "janome",
     tokenizer=None,
     tokenize_text_fn: Optional[Callable[[str], List[Tuple[str, str, Any]]]] = None,
@@ -400,8 +401,14 @@ def tokenize_df(
         text = row[text_col]
 
         tokens = tokenize_text_fn(text)
-        for word, pos, token_info in tokens:
-            rec = {id_col: doc_id, "word": word, "pos": pos}
+        # enumerate でインデックス (i) を取得
+        for i, (word, pos, token_info) in enumerate(tokens):
+            rec = {
+                id_col: doc_id,
+                token_id_col: i,
+                "word": word,
+                "pos": pos
+            }
             if extra_col:
                 rec[extra_col] = token_info
             records.append(rec)
