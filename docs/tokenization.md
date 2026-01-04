@@ -828,7 +828,18 @@ df_tokens = tokenize_df(
 )
 ```
 
-Sudachi のユーザー辞書の作成方法については、[公式ドキュメント（2025-12-26時点）](Sudachi_user_dict.md) を参照しましょう。
+Sudachi のユーザー辞書ソース（CSV）の作成方法については、[公式ドキュメント（2025-12-26時点）](Sudachi_user_dict.md) を参照しましょう。
+
+ただし、上記ドキュメント内の「バイナリ辞書の作成」コマンドは Java 版のものです。Google Colab（Python 環境）では、以下のコマンドを使用してコンパイルしてください。
+
+```bash
+# SudachiPy を使ったユーザー辞書のコンパイル例
+sudachipy ubuild -o user.dic -s system_core input.csv
+```
+
+- `-o`: 出力ファイル名
+- `-s`: ベースとなるシステム辞書 (`system_core` / `system_full`)
+- `input.csv`: 作成した辞書ソースファイル
 
 ---
 
