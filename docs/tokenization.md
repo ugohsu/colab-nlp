@@ -351,8 +351,8 @@ tokenize_df(
 
 tokenize_df の出力には次の列が含まれます。
 
-- `id_col`（例：`doc_id`）
-- `token_id` (文書内通し番号。0, 1, 2,...)
+- `id_col` で指定した列（規定：`doc_id`）
+- `token_id_col` で指定した列 (規定: `token_id`)
 - `word`
 - `pos`
 - `token_info`（extra_col が None のときは作られない／または全て None）
