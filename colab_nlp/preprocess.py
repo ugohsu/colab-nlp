@@ -348,7 +348,7 @@ def tokenize_df(
     Returns
     -------
     pandas.DataFrame
-        columns: [id_col, "word", "pos", extra_col(optional)]
+        columns: [id_col, token_id_col, "word", "pos", extra_col(optional)]
     """
     if id_col not in df.columns:
         raise KeyError(
