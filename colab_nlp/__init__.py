@@ -6,8 +6,6 @@ from .preprocess import (
     tokens_to_text,
 )
 
-from .io_text import build_text_df
-
 from .bow import create_wordcloud
 
 from .corpus_db import CorpusDB

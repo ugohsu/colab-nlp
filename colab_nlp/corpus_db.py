@@ -62,6 +62,7 @@ class CorpusDB:
             """)
 
             # 4. tokens
+            # PRIMARY KEY (doc_id, token_id) を追加して一意性を担保
             con.execute("""
                 CREATE TABLE IF NOT EXISTS tokens (
                     doc_id INTEGER,
@@ -69,6 +70,7 @@ class CorpusDB:
                     word TEXT,
                     pos TEXT,
                     token_info TEXT,
+                    PRIMARY KEY (doc_id, token_id),
                     FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
                 );
             """)
@@ -185,7 +187,6 @@ class CorpusDB:
         # 2. ファイル読み込み
         try:
             text = Path(path_str).read_text(encoding="utf-8", errors="replace")
-            fetch_ok = 1
         except Exception as e:
             raise IOError(f"Failed to read file: {path_str}") from e
 
@@ -199,11 +200,54 @@ class CorpusDB:
         # 4. 解析実行（外部関数）
         df_tokens = tokenize_fn(df_input)
 
-        # 【再修正】token_info を JSON 文字列に変換する（json.loads で復元可能にする）
-        if not df_tokens.empty and "token_info" in df_tokens.columns:
-            df_tokens["token_info"] = df_tokens["token_info"].apply(
-                lambda x: json.dumps(x, ensure_ascii=False) if x is not None else None
+        # 【対策1】None返却時の安全策：Noneならエラーとして扱い、ログに残す
+        if df_tokens is None:
+            raise ValueError(f"tokenize_fn returned None for doc_id={doc_id}. Expected DataFrame.")
+
+        # 【追加対策】型チェック：DataFrame以外が返ってきたらエラーにする
+        if not isinstance(df_tokens, pd.DataFrame):
+            raise TypeError(
+                f"tokenize_fn must return pandas.DataFrame, got {type(df_tokens).__name__} for doc_id={doc_id}"
             )
+
+        if not df_tokens.empty:
+            # 【追加対策】doc_id の強制上書き（関数の実装ミスによるIDズレ・欠損を防止）
+            df_tokens["doc_id"] = doc_id
+
+            # 【対策2】必須カラムチェック：token_id, word が存在し、欠損していないこと
+            if "token_id" not in df_tokens.columns:
+                raise ValueError(f"tokenize_fn must return 'token_id' column for doc_id={doc_id}")
+            if df_tokens["token_id"].isna().any():
+                raise ValueError(f"token_id contains NA for doc_id={doc_id}")
+            
+            if "word" not in df_tokens.columns:
+                raise ValueError(f"tokenize_fn must return 'word' column for doc_id={doc_id}")
+
+            # 【対策3】二重エンコード防止：文字列でない場合のみ json.dumps する
+            if "token_info" in df_tokens.columns:
+                def safe_json_dumps(x):
+                    if x is None:
+                        return None
+                    if isinstance(x, str):
+                        return x  # すでに文字列ならそのまま
+                    return json.dumps(x, ensure_ascii=False)
+
+                df_tokens["token_info"] = df_tokens["token_info"].apply(safe_json_dumps)
+            else:
+                df_tokens["token_info"] = None
+
+            # 【対策4】想定外カラムの除外：テーブル定義にあるカラムだけに絞る
+            valid_cols = ["doc_id", "token_id", "word", "pos", "token_info"]
+            # 存在しない列は None で埋める
+            for col in valid_cols:
+                if col not in df_tokens.columns:
+                    df_tokens[col] = None
+            # 必要な列だけ抽出
+            df_tokens = df_tokens[valid_cols]
+
+            # 【対策5】重複チェック：(doc_id, token_id) が重複していたらエラーにする
+            if df_tokens.duplicated(subset=["doc_id", "token_id"]).any():
+                 raise ValueError(f"Duplicate token_id detected for doc_id={doc_id}.")
         
         # 5. 結果の保存（まとめてトランザクション）
         with self._connect() as con:
@@ -216,18 +260,21 @@ class CorpusDB:
             )
 
             # tokens テーブルへ保存
+            # 再実行時の重複防止：先に既存のトークンを消す（空トークン時も残留させない）
+            con.execute("DELETE FROM tokens WHERE doc_id = ?", (doc_id,))
+            
             if not df_tokens.empty:
-                # 必要なカラムが存在するか確認しつつ保存
                 df_tokens.to_sql(
                     "tokens",
                     con,
                     if_exists="append",
                     index=False,
-                    method="multi", # 複数行一括挿入で高速化
-                    chunksize=5000  # メモリ溢れ防止
+                    method="multi", 
+                    chunksize=5000
                 )
 
             # status 更新（完了）
+            # ここまで到達できた場合のみ fetch_ok=1, tokenize_ok=1 とする
             con.execute("""
                 UPDATE status 
                 SET fetched_at = ?, fetch_ok = 1, tokenize_ok = 1, updated_at = ?, error_message = NULL
