@@ -229,3 +229,101 @@ for start_id in range(1, max_id + 1, chunk_size):
     # Pythonのメモリ上で複雑な絞り込み（ここは自由自在！）
     # 例：token_info の中の文字列を検索するなど
     # target = df_chunk[df_chunk['token_info'].str.contains(...)]
+```
+
+---
+
+## 付録: 詳細リファレンス
+
+### 1. データベース・スキーマ仕様
+
+`CorpusDB` が作成・管理する SQLite データベースのテーブル定義です。
+
+#### `documents` テーブル
+ファイルパスなどのメタデータを管理します。
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `doc_id` | `INTEGER` | `PK`, `AUTOINCREMENT` | 文書ID（他のテーブルでも主キーとして使用） |
+| `abs_path` | `TEXT` | `UNIQUE` | ファイルの絶対パス |
+| `rel_path` | `TEXT` | | `register_files` 実行時のルートディレクトリからの相対パス |
+| `created_at` | `TEXT` | | 登録日時（ISO 8601形式） |
+
+#### `status` テーブル
+各文書の処理進捗とエラー状態を管理します。
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `doc_id` | `INTEGER` | `PK`, `FK` | `documents.doc_id` への外部キー |
+| `fetched_at` | `TEXT` | | テキスト取得（ファイル読み込み）完了日時 |
+| `fetch_ok` | `INTEGER` | `DEFAULT 0` | テキスト取得成功フラグ（0:未, 1:済） |
+| `tokenize_ok` | `INTEGER` | `DEFAULT 0` | 形態素解析成功フラグ（0:未, 1:済） |
+| `error_message` | `TEXT` | | エラー発生時のトレースバック情報 |
+| `updated_at` | `TEXT` | | 最終更新日時 |
+
+#### `text` テーブル
+読み込んだ原文テキストを格納します。
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `doc_id` | `INTEGER` | `PK`, `FK` | `documents.doc_id` への外部キー |
+| `char_count` | `INTEGER` | | 文字数 |
+| `text` | `TEXT` | | 原文テキストデータ |
+
+#### `tokens` テーブル
+形態素解析の結果を格納します。`doc_id` と `token_id` の複合主キーにより一意性が保たれます。
+
+| カラム名 | 型 | 制約 | 説明 |
+| :--- | :--- | :--- | :--- |
+| `doc_id` | `INTEGER` | `FK` | `documents.doc_id` への外部キー |
+| `token_id` | `INTEGER` | | 文書内でのトークン通し番号（0始まり） |
+| `word` | `TEXT` | | トークン（表層形または辞書形など） |
+| `pos` | `TEXT` | | 品詞（大分類） |
+| `token_info` | `TEXT` | | 詳細情報の JSON 文字列（読み、原形など） |
+
+> **Primary Key**: `(doc_id, token_id)`
+> **Index**: `doc_id`, `word`, `pos` にインデックスが作成されます。
+
+---
+
+### 2. API リファレンス (CorpusDB クラス)
+
+ユーザーが利用する主要なメソッドの一覧です。
+
+#### `__init__(self, db_path="corpus.db")`
+データベースに接続し、テーブルが存在しない場合は作成します。
+
+- **Parameters**
+  - `db_path` (str): SQLite データベースファイルのパス。Google Drive 上のパスを推奨。
+
+#### `register_files(self, root_dir, exts=("*.txt",))`
+指定ディレクトリ以下のファイルを走査し、パス情報を `documents` テーブルに登録します。テキストの中身は読み込みません。
+
+- **Parameters**
+  - `root_dir` (str | Path): 走査対象のルートディレクトリ。
+  - `exts` (tuple | list): 対象とする拡張子のリスト（例: `["*.txt", "*.md"]`）。
+
+#### `process_queue(self, tokenize_fn)`
+未処理（`tokenize_ok=0`）のファイルを順次読み込み、解析して保存します。ファイルアクセスを伴います。
+
+- **Parameters**
+  - `tokenize_fn` (callable): `DataFrame(columns=[doc_id, text])` を受け取り、`DataFrame(columns=[doc_id, word, pos, ...])` を返す関数。
+
+#### `reset_tokens(self, doc_ids=None, *, vacuum=False, reset_only_fetched=True)`
+解析結果（`tokens`）を削除し、ステータス（`tokenize_ok`）を未完了（0）に戻します。
+
+- **Parameters**
+  - `doc_ids` (list | None): リセット対象の ID リスト。`None` の場合は全件リセット。
+  - `vacuum` (bool): `True` の場合、削除後に `VACUUM` コマンドを実行して DB ファイルサイズを最適化する。
+  - `reset_only_fetched` (bool): `True` の場合、テキスト取得済み（`fetch_ok=1`）のデータのみステータスを戻す。全件リセット時は通常 `True` でよい。
+
+#### `reprocess_tokens(self, tokenize_fn, *, doc_ids=None, ...)`
+DB 内のテキスト（`fetch_ok=1`）を使用して再解析を行います。ファイルアクセスが発生しないため高速です。
+
+- **Parameters**
+  - `tokenize_fn` (callable): 再解析に使用するトークナイズ関数。
+  - `doc_ids` (list | None): 対象 ID のリスト。`None` の場合は「テキスト取得済みかつ未解析（`tokenize_ok=0`）」の全件を対象とする。
+  - `max_chars` (int): 1バッチあたりの最大文字数（メモリ保護用。既定 `200,000`）。
+  - `max_docs` (int): 1バッチあたりの最大文書数（既定 `500`）。
+  - `progress_every_batches` (int): 進捗表示を行うバッチ間隔（既定 `10`）。
+  - `fallback_to_single` (bool): バッチ処理でエラーが出た際、1件ずつの処理に切り替えて救済するかどうか（既定 `True`）。
