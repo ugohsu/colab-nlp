@@ -84,6 +84,44 @@ db.process_queue(my_tokenizer)
 
 ---
 
+## 設定変更と再処理（高速化）
+
+「辞書を変えたい」「分割モード（A/C単位）を変えたい」といった理由で、**テキスト読み込みはスキップして形態素解析だけをやり直したい**場合は、以下のメソッドを使用します。
+
+ファイルアクセスが発生しないため、`process_queue` よりも高速に試行錯誤のサイクルを回せます。
+
+### 1. 解析結果のリセット
+
+まず、既存の解析結果（tokens）を消去し、ステータスを「未解析」に戻します。
+
+```python
+# tokens テーブルを全消去し、tokenize_ok フラグをリセット
+db.reset_tokens()
+
+# ※ 特定の doc_id だけリセットすることも可能です
+# db.reset_tokens(doc_ids=[1, 2, 3])
+```
+
+### 2. 再処理の実行
+
+DB 内に保存されているテキストデータを使って再解析を実行します。
+
+```python
+# 新しい設定でトークナイザ関数を再定義
+def new_tokenizer(df):
+    # 例：分割モードを A に変更
+    return tokenize_df(df, engine="sudachi", split_mode="A")
+
+# DB内のテキストを使って再解析
+db.reprocess_tokens(new_tokenizer)
+```
+
+このメソッドは バッチ処理（まとめて処理） に対応しており、大量データでも高速に動作します。
+
+> Note: `process_queue` は「未処理のファイル読み込み」を行いますが、`reprocess_tokens` は「DB内のテキスト再利用」を行います。
+
+---
+
 ## 構築したデータの利用方法
 
 作成された corpus.db は SQLite 形式です。pandas と sqlite3 を使って簡単にデータを抽出できます。
