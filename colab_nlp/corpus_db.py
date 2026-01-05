@@ -78,6 +78,9 @@ class CorpusDB:
             # インデックス作成（検索・結合の高速化用）
             con.execute("CREATE INDEX IF NOT EXISTS idx_tokens_doc_id ON tokens(doc_id);")
             con.execute("CREATE INDEX IF NOT EXISTS idx_tokens_word ON tokens(word);")
+            
+            # 【追加】品詞 (pos) 検索用インデックス
+            con.execute("CREATE INDEX IF NOT EXISTS idx_tokens_pos ON tokens(pos);")
 
     def register_files(self, root_dir, exts=("*.txt",)):
         """
