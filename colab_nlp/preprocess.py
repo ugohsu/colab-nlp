@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Callable, Iterable, Optional, Tuple, List, Dict, Any
 import pandas as pd
+from tqdm.auto import tqdm
 
 
 # ----------------------------------------------------------------------
@@ -398,7 +399,7 @@ def tokenize_df(
             raise ValueError(f"tokenize_df: Unknown engine={engine!r}")
 
     records: List[Dict[str, Any]] = []
-    for _, row in df.iterrows():
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Tokenizing"):
         doc_id = row[id_col]
         text = row[text_col]
 
