@@ -26,11 +26,11 @@ WordCloud で日本語を正しく表示するには、
 **日本語フォントファイルのパスを `font_path` として用意し、`create_wordcloud` に渡す必要があります。**
 
 - テンプレート（貼り付けて使う）  
-  - [`templates/matplotlib_japanese_font.py`](../../templates/matplotlib_japanese_font.py)
+  - [`matplotlib_japanese_font.py`](https://github.com/ugohsu/colab-common/blob/main/templates/matplotlib_japanese_font.py)
 - 解説ドキュメント  
-  - [`docs/matplotlib_japanese_font.md`](../matplotlib_japanese_font.md)
+  - [`matplotlib_japanese_font.md`](https://github.com/ugohsu/colab-common/blob/main/docs/matplotlib_japanese_font.md)
 
-👉 上記テンプレは、日本語フォントのパスを取得するための補助です。  
+👉 上記テンプレは、日本語フォントのパスを取得するための補助です ([`colab-common`](https://github.com/ugohsu/colab-common) リポジトリで提供)。  
 ただし、環境によってはフォントパスの調整が必要になるため、
 
 - `font_path` が「日本語対応フォント」を指しているか
