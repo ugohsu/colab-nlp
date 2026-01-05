@@ -64,7 +64,7 @@ fatal: destination path 'colab-common' already exists
 
 | 分類 | 関数名 | 内容 | 実装ファイル | 解説ドキュメント |
 | :--- | :--- | :--- | :--- | :--- |
-| **I/O** | `build_text_df` | フォルダ内のテキストをまとめて読み込みDataFrameを作成 | [`colab_nlp/io_text.py`](./colab_nlp/io_text.py) | [`docs/io_text_basic.md`](./docs/io_text_basic.md) |
+| **I/O** | `CorpusDB` | 大規模テキストデータのDB化・管理（省メモリ・中断再開可） | [`colab_nlp/corpus_db.py`](./colab_nlp/corpus_db.py) | [`docs/corpus_db.md`](./docs/corpus_db.md) |
 | **前処理** | `tokenize_df` | 文書DFを形態素解析し、縦持ち（1行1語）形式に変換 | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
 | **前処理** | `tokenize_text_janome` | Janomeを用いて1つの文字列をトークン化（内部・単体用） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
 | **前処理** | `tokenize_text_sudachi` | Sudachiを用いて1つの文字列をトークン化（内部・単体用） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
@@ -78,6 +78,7 @@ fatal: destination path 'colab-common' already exists
 
 | 分類 | 内容 | ドキュメント |
 | :--- | :--- | :--- |
+| **I/O** | 大規模コーパス構築ガイド (CorpusDB) | [`docs/corpus_db.md`](./docs/corpus_db.md) |
 | **前処理** | Janome / SudachiPy による形態素解析とDataFrame化 | [`docs/tokenization.md`](./docs/tokenization.md) |
 | **前処理** | Sudachi ユーザー辞書の作成・設定方法 | [`docs/Sudachi_user_dict.md`](./docs/Sudachi_user_dict.md) |
 | **BoW** | Bag of Words（BoW）の概念と位置づけ（総論） | [`docs/bow/README.md`](./docs/bow/README.md) |
@@ -97,10 +98,11 @@ fatal: destination path 'colab-common' already exists
 - **基本的な読み込み（colab-common）**
     - テキストファイルの読み込み、Google スプレッドシートや SQLite との連携については、`colab-common` のドキュメント・関数を使用してください。
     - 分析の第一歩として、手持ちのデータを `pandas.DataFrame`（`doc_id` 列と `text` 列を持つ形式）に読み込むことを目指します。
-
-- **フォルダの一括読み込み（build_text_df）**
-    - 本リポジトリ（`colab-nlp`）では、NLP 分析の前段階として「フォルダ配下の大量のテキストファイルを一括で読み込む」ための関数 `build_text_df` を提供しています。
-    - 多数のファイルからなる文書集合を、分析用 DataFrame へ素早く変換する場合に使用します。
+- **大規模コーパスの構築（CorpusDB）**
+    - 本リポジトリ（`colab-nlp`）では、大量のテキストファイルをメモリを節約しながら SQLite データベース化するクラス `CorpusDB` を提供しています。
+    - 処理の中断・再開が可能で、Google Colab 上で数万〜数百万ファイル規模の文書集合を安全に処理するために使用します。
+- 参考資料
+    - [`docs/corpus_db.md`](./docs/corpus_db.md) 
 
 ---
 
