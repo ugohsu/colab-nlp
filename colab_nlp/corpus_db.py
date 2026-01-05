@@ -197,6 +197,10 @@ class CorpusDB:
 
         # 4. 解析実行（外部関数）
         df_tokens = tokenize_fn(df_input)
+
+        # 【修正】token_info が辞書型のままだとエラーになるため、文字列に変換する
+        if not df_tokens.empty and "token_info" in df_tokens.columns:
+            df_tokens["token_info"] = df_tokens["token_info"].astype(str)
         
         # 5. 結果の保存（まとめてトランザクション）
         with self._connect() as con:

@@ -8,7 +8,7 @@ import sys
 from colab_nlp import tokenize_df
 
 # 作成した corpus_db.py を import
-from corpus_db import CorpusDB
+from colab_nlp import CorpusDB
 
 # 2. DBの初期化
 # DBファイル名はお好みで変更してください
