@@ -5,6 +5,11 @@ from datetime import datetime
 import traceback
 import json
 
+# ===== 追加（新メソッド用。既存 import は変更しない） =====
+import time
+from typing import Callable, Optional, Sequence, Union
+# ===========================================================
+
 class CorpusDB:
     def __init__(self, db_path="corpus.db"):
         """
@@ -296,3 +301,228 @@ class CorpusDB:
                 (msg, now, doc_id)
             )
             con.commit()
+
+    # ==================================================================
+    # ここから【新規追加メソッド】のみ
+    # ==================================================================
+
+    def reprocess_tokens(
+        self,
+        tokenize_fn: Callable[[pd.DataFrame], pd.DataFrame],
+        *,
+        doc_ids: Optional[Sequence[Union[int, str]]] = None,
+        max_chars: int = 200_000,
+        max_docs: int = 500,
+        progress_every_batches: int = 10,
+        progress_every_seconds: int = 10,
+        fallback_to_single: bool = True,
+    ):
+        """
+        tokenize_ok=0 の文書を char_count ベースで batch 再解析する。
+        """
+
+        with self._connect() as con:
+            if doc_ids is None:
+                df = pd.read_sql(
+                    """
+                    SELECT s.doc_id,
+                           t.text,
+                           t.char_count
+                    FROM status s
+                    JOIN text t ON t.doc_id = s.doc_id
+                    WHERE s.fetch_ok = 1 AND s.tokenize_ok = 0
+                    ORDER BY s.doc_id
+                    """,
+                    con,
+                )
+            else:
+                doc_ids = list(doc_ids)
+                if not doc_ids:
+                    print("doc_ids is empty; nothing to reprocess.")
+                    return
+                ph = ",".join(["?"] * len(doc_ids))
+                df = pd.read_sql(
+                    f"""
+                    SELECT s.doc_id,
+                           t.text,
+                           t.char_count
+                    FROM status s
+                    JOIN text t ON t.doc_id = s.doc_id
+                    WHERE s.fetch_ok = 1 AND s.tokenize_ok = 0
+                      AND s.doc_id IN ({ph})
+                    ORDER BY s.doc_id
+                    """,
+                    con,
+                    params=doc_ids,
+                )
+
+        if df.empty:
+            print("No documents to reprocess.")
+            return
+
+        df["char_count"] = df["char_count"].fillna(0).astype(int)
+
+        total_docs = len(df)
+        total_chars = int(df["char_count"].sum())
+
+        batches = self._pack_batches_by_chars(
+            df, max_chars=max_chars, max_docs=max_docs
+        )
+
+        print(
+            f"Starting reprocess: {total_docs} docs / {total_chars:,} chars "
+            f"in {len(batches)} batches"
+        )
+
+        t0 = time.time()
+        last_print = t0
+        done_docs = 0
+        done_chars = 0
+
+        for bi, batch_df in enumerate(batches, start=1):
+            batch_docs = len(batch_df)
+            batch_chars = int(batch_df["char_count"].sum())
+
+            try:
+                self._reprocess_batch(batch_df, tokenize_fn)
+            except Exception as e:
+                print(f"[Batch {bi}] Error: {e}")
+                if not fallback_to_single:
+                    raise
+                for doc_id in batch_df["doc_id"].tolist():
+                    try:
+                        self._process_one(doc_id, tokenize_fn)
+                    except Exception as e2:
+                        self._log_error(doc_id, e2)
+
+            done_docs += batch_docs
+            done_chars += batch_chars
+
+            now = time.time()
+            if (
+                bi % progress_every_batches == 0
+                or (now - last_print) >= progress_every_seconds
+                or bi == len(batches)
+            ):
+                elapsed = now - t0
+                cps = done_chars / max(elapsed, 1e-9)
+                eta = (total_chars - done_chars) / max(cps, 1e-9)
+
+                print(
+                    f"[{bi}/{len(batches)}] "
+                    f"docs {done_docs}/{total_docs} | "
+                    f"chars {done_chars:,}/{total_chars:,} | "
+                    f"{cps:,.0f} ch/s | ETA {self._fmt_eta(eta)}"
+                )
+                last_print = now
+
+        print("Reprocessing finished.")
+
+    def _reprocess_batch(self, batch_df: pd.DataFrame, tokenize_fn):
+        """複数文書をまとめて tokenize して保存"""
+
+        df_input = batch_df[["doc_id", "text"]]
+        df_tokens = tokenize_fn(df_input)
+
+        if df_tokens is None or not isinstance(df_tokens, pd.DataFrame):
+            raise ValueError("tokenize_fn must return DataFrame.")
+
+        if not df_tokens.empty:
+            if "doc_id" not in df_tokens.columns:
+                raise ValueError("batch tokenize requires doc_id column.")
+
+            if "token_id" not in df_tokens.columns:
+                df_tokens["token_id"] = (
+                    df_tokens.groupby("doc_id").cumcount() + 1
+                )
+
+            df_tokens["token_id"] = pd.to_numeric(
+                df_tokens["token_id"], errors="raise"
+            ).astype(int)
+
+            if "token_info" in df_tokens.columns:
+                df_tokens["token_info"] = df_tokens["token_info"].apply(
+                    lambda x: json.dumps(x, ensure_ascii=False)
+                    if isinstance(x, (dict, list))
+                    else x
+                )
+            else:
+                df_tokens["token_info"] = None
+
+            valid_cols = ["doc_id", "token_id", "word", "pos", "token_info"]
+            for c in valid_cols:
+                if c not in df_tokens.columns:
+                    df_tokens[c] = None
+            df_tokens = df_tokens[valid_cols]
+
+            if df_tokens.duplicated(subset=["doc_id", "token_id"]).any():
+                raise ValueError("Duplicate (doc_id, token_id) detected in batch.")
+
+        with self._connect() as con:
+            ids = batch_df["doc_id"].tolist()
+            ph = ",".join(["?"] * len(ids))
+
+            con.execute(f"DELETE FROM tokens WHERE doc_id IN ({ph})", ids)
+
+            if not df_tokens.empty:
+                df_tokens.to_sql(
+                    "tokens",
+                    con,
+                    if_exists="append",
+                    index=False,
+                    method="multi",
+                    chunksize=5000,
+                )
+
+            now = datetime.now().isoformat()
+            con.execute(
+                f"""
+                UPDATE status
+                SET tokenize_ok = 1, updated_at = ?, error_message = NULL
+                WHERE doc_id IN ({ph})
+                """,
+                [now, *ids],
+            )
+            con.commit()
+
+    def _pack_batches_by_chars(self, df, *, max_chars: int, max_docs: int):
+        batches = []
+        cur = []
+        cur_chars = 0
+
+        for row in df.itertuples(index=False):
+            doc_chars = int(row.char_count)
+
+            if cur and (
+                cur_chars + doc_chars > max_chars
+                or len(cur) >= max_docs
+            ):
+                batches.append(pd.DataFrame(cur))
+                cur = []
+                cur_chars = 0
+
+            cur.append(
+                {
+                    "doc_id": row.doc_id,
+                    "text": row.text,
+                    "char_count": doc_chars,
+                }
+            )
+            cur_chars += doc_chars
+
+        if cur:
+            batches.append(pd.DataFrame(cur))
+
+        return batches
+
+    @staticmethod
+    def _fmt_eta(seconds: float) -> str:
+        seconds = max(0, int(seconds))
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        if h > 0:
+            return f"{h}h{m:02d}m"
+        if m > 0:
+            return f"{m}m{s:02d}s"
+        return f"{s}s"
