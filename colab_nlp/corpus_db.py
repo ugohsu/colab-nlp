@@ -3,6 +3,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 import traceback
+import json
 
 class CorpusDB:
     def __init__(self, db_path="corpus.db"):
@@ -198,9 +199,11 @@ class CorpusDB:
         # 4. 解析実行（外部関数）
         df_tokens = tokenize_fn(df_input)
 
-        # 【修正】token_info が辞書型のままだとエラーになるため、文字列に変換する
+        # 【再修正】token_info を JSON 文字列に変換する（json.loads で復元可能にする）
         if not df_tokens.empty and "token_info" in df_tokens.columns:
-            df_tokens["token_info"] = df_tokens["token_info"].astype(str)
+            df_tokens["token_info"] = df_tokens["token_info"].apply(
+                lambda x: json.dumps(x, ensure_ascii=False) if x is not None else None
+            )
         
         # 5. 結果の保存（まとめてトランザクション）
         with self._connect() as con:
