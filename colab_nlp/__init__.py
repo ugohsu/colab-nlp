@@ -10,6 +10,7 @@ from .io_text import build_text_df
 
 from .bow import create_wordcloud
 
+from .corpus_db import CorpusDB
 
 __all__ = [
     # 前処理（入口）
@@ -28,4 +29,7 @@ __all__ = [
 
     # BoW / 可視化
     "create_wordcloud",
+
+    # 大規模コーパス構築
+    "CorpusDB",
 ]
