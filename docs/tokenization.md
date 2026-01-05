@@ -1,15 +1,10 @@
 # 形態素解析を行う関数（Janome / SudachiPy）
 
-本ドキュメントでは、Pandas DataFrame に格納された日本語テキストを対象として、  
-**Janome** または **SudachiPy** を用いた形態素解析を行い、  
-「**1行 = 1トークン**」の縦持ち DataFrame に変換する関数群について説明します。
+本ドキュメントでは、Pandas DataFrame に格納された日本語テキストを対象として、 **Janome** または **SudachiPy** を用いた形態素解析を行い、「**1行 = 1トークン**」の縦持ち DataFrame に変換する関数群について説明します。
 
-これらの関数は **ライブラリ化**されており、  
-Google Colaboratory 上では本リポジトリを clone したうえで **import して使用**します。
+これらの関数は **ライブラリ化**されており、 Google Colaboratory 上では本リポジトリを clone したうえで **import して使用**します。
 
-いずれも **文書ID列を必須**とする設計であり、  
-LDA / NMF / TF-IDF / WordCloud / 語頻度集計などの分析処理に  
-そのまま接続できることを重視しています。
+いずれも **文書ID列を必須**とする設計であり、 LDA / NMF / TF-IDF / WordCloud / 語頻度集計などの分析処理にそのまま接続できることを重視しています。
 
 ---
 
@@ -27,7 +22,7 @@ Janome と SudachiPy を **同時にインストールする必要はありま�
 
 ---
 
-### 1-A. Janome を使う場合（おすすめ：授業・演習）
+### 1-A. Janome を使う場合（授業・演習）
 
 ```python
 !pip install janome
@@ -449,8 +444,7 @@ df_no_symbols = filter_tokens_df(
 
 `strict=True` のとき：
 
-- 両者の集合が **完全に無関係（共通要素がゼロ）** の場合、  
-  意図しない指定の可能性が高いため `ValueError` を出します。
+- 両者の集合が **完全に無関係（共通要素がゼロ）** の場合、意図しない指定の可能性が高いため警告を出します。
 
 ```python
 # strict=True（デフォルト）
