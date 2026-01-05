@@ -495,7 +495,10 @@ df_f = filter_tokens_df(
   stopwords=["ある", "いる"]
   ```
 - pandas.Series（`value_counts()` の結果など）  
-  → **index 部分**が stopwords として使われます
+  → **index 部分（単語）** が自動的に stopwords として使われます
+  > **⚠️ 注意** > Series を渡すと、値（values）ではなく **インデックス（index）** が参照されます。  
+  > もし Series の **中身（値）** をストップワードとして使いたい場合は、  
+  > `list(series)` や `set(series)` に変換してから渡してください。
 - pandas.Index
 - 上記を入れ子にした構造  
   ```python
