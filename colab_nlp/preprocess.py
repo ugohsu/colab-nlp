@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Callable, Iterable, Optional, Tuple, List, Dict, Any
 import pandas as pd
+import warnings
 from tqdm.auto import tqdm
 
 
@@ -34,16 +35,16 @@ def _compile_pos_filter(
     # NOTE:
     # strict=True のとき、
     #   keep と exclude を同時指定して「交差がゼロ」だと、
-    #   指定ミス（意図とズレ）の可能性が高いのでエラーにする。
+    #   指定ミス（意図とズレ）の可能性が高いので警告を出す。
     if strict and keep_set and excl_set:
         if keep_set.isdisjoint(excl_set):
-            raise ValueError(
+            warnings.warn(
                 "pos_keep と pos_exclude が同時指定されていますが、"
-                "両者に交差がありません。指定ミスの可能性があります。"
+                "両者に交差がありません。指定ミスの可能性があります。",
+                UserWarning
             )
 
     return keep_set, excl_set
-
 
 def _normalize_stopwords(stopwords) -> set:
     """
