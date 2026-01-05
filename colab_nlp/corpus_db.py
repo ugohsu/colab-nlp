@@ -385,15 +385,25 @@ class CorpusDB:
 
             try:
                 self._reprocess_batch(batch_df, tokenize_fn)
+
             except Exception as e:
                 print(f"[Batch {bi}] Error: {e}")
                 if not fallback_to_single:
                     raise
-                for doc_id in batch_df["doc_id"].tolist():
+
+                # フォールバック：ファイルを読みに行かず、batch_df に載っている text を使って 1件ずつ再処理
+                for row in batch_df.itertuples(index=False):
+                    # row には doc_id / text / char_count がある想定（あなたの pack の出力に合わせる）
+                    df_single = pd.DataFrame([{
+                        "doc_id": row.doc_id,
+                        "text": row.text,
+                        "char_count": getattr(row, "char_count", None),
+                    }])
+
                     try:
-                        self._process_one(doc_id, tokenize_fn)
+                        self._reprocess_batch(df_single, tokenize_fn)
                     except Exception as e2:
-                        self._log_error(doc_id, e2)
+                        self._log_error(row.doc_id, e2)
 
             done_docs += batch_docs
             done_chars += batch_chars
