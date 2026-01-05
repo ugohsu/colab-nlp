@@ -106,13 +106,33 @@ db.reset_tokens()
 
 DB 内に保存されているテキストデータを使って再解析を実行します。
 
-```python
-# 新しい設定でトークナイザ関数を再定義
-def new_tokenizer(df):
-    # 例：分割モードを A に変更
-    return tokenize_df(df, engine="sudachi", split_mode="A")
+以下は、「Sudachi の Full 辞書」 を使い、「表層形（surface）」 で解析し直す例です。
 
-# DB内のテキストを使って再解析
+```python
+# 1. Full辞書のインストール（未インストールの場合）
+!pip install sudachidict_full
+
+from sudachipy import dictionary
+from colab_nlp import tokenize_text_sudachi
+
+# 2. Full辞書を指定して Tokenizer を作成
+full_tokenizer = dictionary.Dictionary(dict="full").create()
+
+# 3. 再処理用の関数を定義
+#    Sudachi 固有の調整（辞書・語形・分割モード）を行いたい場合は
+#    tokenize_text_fn を使って詳細を指定します。
+def new_tokenizer(df):
+    return tokenize_df(
+        df,
+        tokenize_text_fn=lambda text: tokenize_text_sudachi(
+            text,
+            tokenizer=full_tokenizer,   # 作成したFull辞書Tokenizer
+            split_mode="C",             # 分割モード (A/B/C)
+            word_form="surface"         # 表層形を採用 (辞書形なら "dictionary")
+        )
+    )
+
+# 4. DB内のテキストを使って再解析
 db.reprocess_tokens(new_tokenizer)
 ```
 
