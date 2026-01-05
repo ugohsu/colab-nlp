@@ -22,9 +22,6 @@ __all__ = [
     "filter_tokens_df",
     "tokens_to_text",
 
-    # テキスト入出力
-    "build_text_df",
-
     # BoW / 可視化
     "create_wordcloud",
 
