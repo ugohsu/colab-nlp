@@ -306,6 +306,89 @@ class CorpusDB:
     # ここから【新規追加メソッド】のみ
     # ==================================================================
 
+    def reset_tokens(
+        self,
+        doc_ids: Optional[Sequence[Union[int, str]]] = None,
+        *,
+        vacuum: bool = False,
+        reset_only_fetched: bool = True,
+    ) -> None:
+        """
+        tokens を削除し、対応する status.tokenize_ok を 0 に戻す。
+
+        Parameters
+        ----------
+        doc_ids : list[int|str] | None
+            None の場合は全消去。指定した場合はその doc_id のみ削除/リセット。
+        vacuum : bool
+            True の場合、削除後に VACUUM を実行してDBファイルサイズを最適化する。
+            ※ VACUUM はトランザクション外で実行される必要がある。
+        reset_only_fetched : bool
+            doc_ids=None の全リセット時に、fetch_ok=1 の行だけ tokenize_ok を戻すかどうか。
+            True 推奨（未fetchまで巻き戻す必要があるなら False）。
+        """
+        now = datetime.now().isoformat()
+
+        def _placeholders(n: int) -> str:
+            return ",".join(["?"] * n)
+
+        print("Resetting tokens and status...")
+
+        # --- 1) DELETE tokens + reset status ---
+        with self._connect() as con:
+            if doc_ids is None:
+                # 全消去
+                con.execute("DELETE FROM tokens")
+
+                # tokenize_ok を戻す範囲
+                if reset_only_fetched:
+                    con.execute(
+                        """
+                        UPDATE status
+                        SET tokenize_ok = 0, updated_at = ?, error_message = NULL
+                        WHERE fetch_ok = 1
+                        """,
+                        (now,),
+                    )
+                else:
+                    con.execute(
+                        """
+                        UPDATE status
+                        SET tokenize_ok = 0, updated_at = ?, error_message = NULL
+                        """,
+                        (now,),
+                    )
+            else:
+                # 部分消去
+                doc_ids = list(doc_ids)
+                if len(doc_ids) == 0:
+                    print("doc_ids is empty; nothing to reset.")
+                    return
+
+                ph = _placeholders(len(doc_ids))
+
+                con.execute(f"DELETE FROM tokens WHERE doc_id IN ({ph})", doc_ids)
+
+                con.execute(
+                    f"""
+                    UPDATE status
+                    SET tokenize_ok = 0, updated_at = ?, error_message = NULL
+                    WHERE doc_id IN ({ph})
+                    """,
+                    [now, *doc_ids],
+                )
+
+            con.commit()
+
+        # --- 2) VACUUM (optional) ---
+        if vacuum:
+            # VACUUM はトランザクション外で実行する必要がある
+            with self._connect() as con:
+                con.execute("VACUUM")
+                con.commit()
+
+        print("Reset complete. Ready to reprocess.")
+
     def reprocess_tokens(
         self,
         tokenize_fn: Callable[[pd.DataFrame], pd.DataFrame],
