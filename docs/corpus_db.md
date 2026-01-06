@@ -168,6 +168,7 @@ with sqlite3.connect(db_path) as con:
         FROM tokens t
         JOIN documents d ON t.doc_id = d.doc_id
         WHERE t.word = '猫'
+        ORDER BY t.doc_id, t.token_id  -- 順序を固定
         LIMIT 10
     """, con)
 
@@ -219,7 +220,11 @@ chunk_size = 1000
 for start_id in range(1, max_id + 1, chunk_size):
     # doc_id の範囲指定はインデックスが効くので高速
     df_chunk = pd.read_sql(
-        f"SELECT * FROM tokens WHERE doc_id >= {start_id} AND doc_id < {start_id + chunk_size}", 
+        f"""
+        SELECT * FROM tokens 
+        WHERE doc_id >= {start_id} AND doc_id < {start_id + chunk_size}
+        ORDER BY doc_id, token_id
+        """,
         con
     )
     
