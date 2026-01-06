@@ -204,7 +204,7 @@ class CorpusDB:
         
         # 2. ファイル読み込み
         try:
-            text = Path(path_str).read_text(encoding="utf-8", errors="replace")
+            text = Path(path_str).read_text(encoding="utf-8", errors="strict")
         except Exception as e:
             raise IOError(f"Failed to read file: {path_str}") from e
 
@@ -553,10 +553,24 @@ class CorpusDB:
             if "doc_id" not in df_tokens.columns:
                 raise ValueError("batch tokenize requires doc_id column.")
 
+            # 【追加修正】word カラム必須チェック (process_queue と同等)
+            if "word" not in df_tokens.columns:
+                raise ValueError("tokenize_fn must return 'word' column.")
+
+            # 【追加修正】doc_id 整合性チェック (バッチ外のID混入防止)
+            # batch_df にある ID 以外が含まれていたらエラーにする
+            valid_ids = set(batch_df["doc_id"])
+            if not set(df_tokens["doc_id"]).issubset(valid_ids):
+                 raise ValueError("tokenize_fn returned doc_ids not in current batch.")
+
             if "token_id" not in df_tokens.columns:
                 df_tokens["token_id"] = (
                     df_tokens.groupby("doc_id").cumcount() + 1
                 )
+
+            # 【追加修正】token_id NAチェック (明示的なエラー)
+            if df_tokens["token_id"].isna().any():
+                raise ValueError("token_id contains NA.")
 
             df_tokens["token_id"] = pd.to_numeric(
                 df_tokens["token_id"], errors="raise"
