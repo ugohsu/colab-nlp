@@ -327,3 +327,56 @@ DB 内のテキスト（`fetch_ok=1`）を使用して再解析を行います�
   - `max_docs` (int): 1バッチあたりの最大文書数（既定 `500`）。
   - `progress_every_batches` (int): 進捗表示を行うバッチ間隔（既定 `10`）。
   - `fallback_to_single` (bool): バッチ処理でエラーが出た際、1件ずつの処理に切り替えて救済するかどうか（既定 `True`）。
+
+---
+
+### 共通ユーティリティ関数 (corpus_reader)
+
+大規模データ（SQLite データベース）から、メモリを節約しつつトークン列を読み込むためのヘルパー関数（ジェネレータ）です。
+
+```python
+corpus_reader(
+    db_path,
+    *,
+    table_name="tokens",
+    id_col="doc_id",
+    word_col="word",
+    chunk_size=1000,
+) -> Generator[list[str]]
+```
+
+#### 引数
+
+* **`db_path`** (必須)
+* 型: `str`
+* SQLite データベースファイルのパス（例: `"corpus.db"`）。
+
+
+* **`table_name`**
+* 型: `str`
+* 既定: `"tokens"`
+* 読み込み対象のテーブル名。
+
+
+* **`id_col`**
+* 型: `str`
+* 既定: `"doc_id"`
+* 文書IDのカラム名。データの読み込み範囲を制御するために使用されます。
+
+
+* **`word_col`**
+* 型: `str`
+* 既定: `"word"`
+* 単語のカラム名。
+
+
+* **`chunk_size`**
+* 型: `int`
+* 既定: `1000`
+* 一度に DB から読み込む文書IDの範囲（幅）。
+* 大きくすると DB アクセス回数は減りますが、メモリ使用量が増えます。
+
+#### 戻り値 (Yields)
+
+* **`list[str]`**
+* 1文書に含まれるトークンのリストを、文書ごとに順番に返します（yield）。

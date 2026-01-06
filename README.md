@@ -65,12 +65,14 @@ fatal: destination path 'colab-common' already exists
 | 分類 | 関数名 | 内容 | 実装ファイル | 解説ドキュメント |
 | :--- | :--- | :--- | :--- | :--- |
 | **I/O** | `CorpusDB` | 大規模テキストデータのDB化・管理（省メモリ・中断再開可） | [`colab_nlp/corpus_db.py`](./colab_nlp/corpus_db.py) | [`docs/corpus_db.md`](./docs/corpus_db.md) |
+| **I/O** | `corpus_reader` | 大規模DBからトークンを逐次読み込み（ジェネレータ） | [`colab_nlp/corpus_db.py`](./colab_nlp/corpus_db.py) | [`docs/bow/ngram.md`](./docs/bow/ngram.md) |
 | **前処理** | `tokenize_df` | 文書DFを形態素解析し、縦持ち（1行1語）形式に変換 | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
 | **前処理** | `tokenize_text_janome` | Janomeを用いて1つの文字列をトークン化（内部・単体用） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
 | **前処理** | `tokenize_text_sudachi` | Sudachiを用いて1つの文字列をトークン化（内部・単体用） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
 | **前処理** | `filter_tokens_df` | トークンDFから特定の品詞やストップワードを除外・抽出 | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
 | **前処理** | `tokens_to_text` | トークンDFを分かち書きテキスト（文字列）に再結合 | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 | **BoW / 可視化** | `create_wordcloud` | 分かち書きテキストからWordCloud画像を生成・表示 | [`colab_nlp/bow.py`](./colab_nlp/bow.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
+| **BoW** | `compute_ngram` | トークン列からN-gram頻度を集計（DataFrame/大規模対応） | [`colab_nlp/ngram.py`](./colab_nlp/ngram.py) | [`docs/bow/ngram.md`](./docs/bow/ngram.md) |
 
 ---
 
@@ -84,6 +86,7 @@ fatal: destination path 'colab-common' already exists
 | **BoW** | Bag of Words（BoW）の概念と位置づけ（総論） | [`docs/bow/README.md`](./docs/bow/README.md) |
 | **BoW** | 語頻度（Term Frequency）の集計方法 | [`docs/bow/term_frequency.md`](./docs/bow/term_frequency.md) |
 | **BoW / 可視化** | WordCloud による可視化 | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
+| **BoW** | N-gram（Nグラム）の集計と大規模データ対応 | [`docs/bow/ngram.md`](./docs/bow/ngram.md) |
 
 ---
 
@@ -139,6 +142,17 @@ fatal: destination path 'colab-common' already exists
         - [`docs/bow/term_frequency.md`](./docs/bow/term_frequency.md)
     - WordCloud による可視化
         - [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md)
+
+---
+
+### 3. N-gram
+
+- 隣り合うN個の単語（Bigram, Trigram...）の出現頻度
+- 複合語（「人工」+「知能」）の発見や文脈の把握
+- 大規模データ（CorpusDB）への対応手法
+
+👉 解説ドキュメント
+- [`ngram.md`](./docs/bow/ngram.md)
 
 ---
 

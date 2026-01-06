@@ -8,7 +8,9 @@ from .preprocess import (
 
 from .bow import create_wordcloud
 
-from .corpus_db import CorpusDB
+from .corpus_db import CorpusDB, corpus_reader
+
+from .ngram import compute_ngram
 
 __all__ = [
     # 前処理（入口）
@@ -27,4 +29,10 @@ __all__ = [
 
     # 大規模コーパス構築
     "CorpusDB",
+
+    # 共通ユーティリティ
+    "corpus_reader",
+
+    # N-gram
+    "compute_ngram",
 ]

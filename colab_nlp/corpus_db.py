@@ -7,7 +7,7 @@ import json
 
 # ===== 追加（新メソッド用。既存 import は変更しない） =====
 import time
-from typing import Callable, Optional, Sequence, Union
+from typing import Callable, Optional, Sequence, Union, Generator
 # ===========================================================
 
 class CorpusDB:
@@ -619,3 +619,84 @@ class CorpusDB:
         if m > 0:
             return f"{m}m{s:02d}s"
         return f"{s}s"
+
+# ----------------------------------------------------------------------
+# クラスの外に定義
+# ----------------------------------------------------------------------
+
+def corpus_reader(
+    db_path: str,
+    *,
+    table_name: str = "tokens",
+    id_col: str = "doc_id",
+    word_col: str = "word",
+    chunk_size: int = 1000
+) -> Generator[list[str], None, None]:
+    """
+    指定されたSQLiteデータベースから文書ごとにトークン列を読み込むジェネレータ。
+    メモリを節約するために、chunk_size 単位でデータを取得し、1文書ずつ yield する。
+
+    Parameters
+    ----------
+    db_path : str
+        SQLiteデータベースへのパス。
+    table_name : str
+        読み込み対象のテーブル名（既定: "tokens"）。
+    id_col : str
+        文書IDのカラム名（既定: "doc_id"）。
+    word_col : str
+        単語のカラム名（既定: "word"）。
+    chunk_size : int
+        一度に読み込む文書IDの範囲（既定: 1000）。
+
+    Yields
+    ------
+    list[str]
+        1文書分のトークンリスト。
+    """
+    with sqlite3.connect(db_path) as con:
+        # 文書IDの最大値を取得して、ループの範囲を決める
+        try:
+            # プレースホルダはテーブル名/列名には使えないため、f-stringを使用
+            # (内部利用前提のためSQLインジェクションリスクは許容範囲とする)
+            max_id_df = pd.read_sql(f"SELECT MAX({id_col}) FROM {table_name}", con)
+            max_id = max_id_df.iloc[0, 0]
+        except Exception as e:
+            print(f"corpus_reader: Error reading max id from table '{table_name}': {e}")
+            return
+
+        if max_id is None:
+            return
+
+        # chunk_size ごとに範囲を区切って読み込む
+        # IDが 0 始まりか 1 始まりか不明なため、0 から max_id までカバーする
+        for start_id in range(0, int(max_id) + 1, chunk_size):
+            end_id = start_id + chunk_size
+            
+            query = f"""
+                SELECT {id_col}, {word_col}
+                FROM {table_name}
+                WHERE {id_col} >= {start_id} AND {id_col} < {end_id}
+            """
+            
+            try:
+                df_chunk = pd.read_sql(query, con)
+            except Exception:
+                # 該当範囲にデータがない場合などはスキップ
+                continue
+
+            if df_chunk.empty:
+                continue
+
+            # 欠損除去（wordがNaNだと後続処理でエラーになるため）
+            df_chunk = df_chunk.dropna(subset=[word_col])
+            
+            if df_chunk.empty:
+                continue
+
+            # 文書IDごとにグループ化し、単語リストを作成して yield
+            # sort=False にすることで処理を高速化
+            groups = df_chunk.groupby(id_col, sort=False)[word_col].apply(list)
+            
+            for tokens_list in groups:
+                yield tokens_list
