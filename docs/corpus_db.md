@@ -341,6 +341,7 @@ corpus_reader(
     table_name="tokens",
     id_col="doc_id",
     word_col="word",
+    token_id_col="token_id",
     chunk_size=1000,
 ) -> Generator[list[str]]
 ```
@@ -369,6 +370,10 @@ corpus_reader(
 * 既定: `"word"`
 * 単語のカラム名。
 
+* **`token_id_col`**
+* 型: `str`
+* 既定: `"token_id"`
+* 文書内の語順を保証するためのカラム名。N-gram 解析などでは必須です。
 
 * **`chunk_size`**
 * 型: `int`
