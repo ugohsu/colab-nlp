@@ -2,7 +2,6 @@
 N-gram 集計ユーティリティ
 
 主な機能:
-- corpus_reader: 大規模データベースからトークン列を逐次読み込むジェネレータ
 - compute_ngram: トークン列（DataFrame または ジェネレータ）からN-gram頻度を算出する
 """
 

@@ -268,11 +268,3 @@ create_wordcloud(
 - 授業・演習での可視化デモ
 - BoW に基づく直感的な説明資料
 
----
-
-## 関連ドキュメント
-
-- 形態素解析  
-  - [`docs/tokenization.md`](../tokenization.md)
-- 日本語フォント設定  
-  - [`docs/matplotlib_japanese_font.md`](../matplotlib_japanese_font.md)
