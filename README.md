@@ -73,6 +73,7 @@ fatal: destination path 'colab-common' already exists
 | **前処理** | `tokens_to_text` | トークンDFを分かち書きテキスト（文字列）に再結合 | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 | **BoW / 可視化** | `create_wordcloud` | 分かち書きテキストからWordCloud画像を生成・表示 | [`colab_nlp/bow.py`](./colab_nlp/bow.py) | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 | **BoW** | `compute_ngram` | トークン列からN-gram頻度を集計（DataFrame/大規模対応） | [`colab_nlp/ngram.py`](./colab_nlp/ngram.py) | [`docs/bow/ngram.md`](./docs/bow/ngram.md) |
+| **BoW / 可視化** | `create_network_graph` | 共起ネットワーク図を作成・表示 | [`colab_nlp/network_graph.py`](./colab_nlp/network_graph.py) | [`docs/bow/network_graph.md`](./docs/bow/network_graph.md) |
 
 ---
 
@@ -87,6 +88,7 @@ fatal: destination path 'colab-common' already exists
 | **BoW** | 語頻度（Term Frequency）の集計方法 | [`docs/bow/term_frequency.md`](./docs/bow/term_frequency.md) |
 | **BoW / 可視化** | WordCloud による可視化 | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 | **BoW** | N-gram（Nグラム）の集計と大規模データ対応 | [`docs/bow/ngram.md`](./docs/bow/ngram.md) |
+| **BoW / 可視化** | 共起ネットワーク分析による可視化 | [`docs/bow/network_graph.md`](./docs/bow/network_graph.md) |
 
 ---
 
@@ -138,21 +140,14 @@ fatal: destination path 'colab-common' already exists
 - 参考資料
     - BoW 総論・位置づけ
         - [`docs/bow/README.md`](./docs/bow/README.md)
-    - 語頻度分析（最小構成）
+    - 語頻度分析
         - [`docs/bow/term_frequency.md`](./docs/bow/term_frequency.md)
     - WordCloud による可視化
         - [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md)
-
----
-
-### 4. N-gram
-
-- 隣り合うN個の単語（Bigram, Trigram...）の出現頻度
-- 複合語（「人工」+「知能」）の発見や文脈の把握
-- 大規模データ（CorpusDB）への対応手法
-
-👉 解説ドキュメント
-- [`ngram.md`](./docs/bow/ngram.md)
+    - N-gram
+        - [`docs/bow/ngram.md`](./docs/bow/ngram.md)
+    - 共起ネットワーク
+        - [`docs/bow/network_graph.md`](./docs/bow/network_graph.md)
 
 ---
 

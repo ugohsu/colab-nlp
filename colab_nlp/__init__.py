@@ -12,6 +12,8 @@ from .corpus_db import CorpusDB, corpus_reader
 
 from .ngram import compute_ngram
 
+from .network_graph import create_network_graph
+
 __all__ = [
     # 前処理（入口）
     "tokenize_df",
@@ -35,4 +37,7 @@ __all__ = [
 
     # N-gram
     "compute_ngram",
+
+    # 可視化
+    "create_network_graph",
 ]
