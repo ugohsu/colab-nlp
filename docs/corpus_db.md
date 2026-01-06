@@ -164,6 +164,71 @@ db.reprocess_tokens(my_tokenizer)
 
 ---
 
+## Tips: 文字コードエラー（Shift_JIS など）への対処
+
+`CorpusDB` は、テキストファイルを **UTF-8** として読み込みます。そのため、Shift_JIS (CP932) や EUC-JP など、異なる文字コードで保存されたファイルが含まれている場合、`process_queue` の実行中に読み込みエラーが発生し、処理がスキップされます（`fetch_ok=0` のままになります）。
+
+このような場合、読み込みに失敗したファイルだけを特定し、ツール（`nkf`）を使って UTF-8 に一括変換・上書きすることで解決できます。
+
+### 手順
+
+#### 1. nkf のインストール
+
+Google Colab 上で `nkf` コマンドを使えるようにします。
+
+```python
+!sudo apt-get install -y nkf
+
+```
+
+#### 2. エラーファイルの特定と変換
+
+データベースの `status` テーブルから「読み込みに失敗したファイル（`fetch_ok=0` かつ エラーログあり）」のパスを取得し、`nkf -w --overwrite` コマンドで UTF-8 に変換します。
+
+> **⚠️ 注意**: この操作は元のファイルを **上書き** します。必ず元データのバックアップをとった上で実行してください。  
+> `fetch_ok = 0` は文字コード以外でもさまざまな原因で生じ得ます。この操作ですべての問題が解決するわけではありません。
+
+```python
+import sqlite3
+import subprocess
+import pandas as pd
+
+# DBパス（ご自身の環境に合わせて変更してください）
+db_path = "/content/drive/MyDrive/nlp_data/my_corpus.db"
+
+# 1. 読み込みに失敗したファイルのパスを取得
+with sqlite3.connect(db_path) as con:
+    df_err = pd.read_sql("""
+        SELECT d.abs_path
+        FROM status s
+        JOIN documents d ON s.doc_id = d.doc_id
+        WHERE s.fetch_ok = 0 
+          AND s.error_message IS NOT NULL
+    """, con)
+
+print(f"変換対象: {len(df_err)} 件")
+
+# 2. nkf で UTF-8 に変換（上書き）
+#    -w: UTF-8を出力
+#    --overwrite: 元ファイルを上書き
+for path in df_err["abs_path"]:
+    subprocess.run(["nkf", "-w", "--overwrite", path])
+
+print("変換が完了しました。")
+
+```
+
+#### 3. 処理の再開
+
+変換後、再度 `process_queue` を実行すると、先ほどエラーになったファイルが正しく読み込まれます（未処理分として自動的にピックアップされます）。
+
+```python
+# エラーだったファイルのみ再処理されます
+db.process_queue(my_tokenizer)
+```
+
+---
+
 ## 構築したデータの利用方法
 
 作成された corpus.db は SQLite 形式です。pandas と sqlite3 を使って簡単にデータを抽出できます。
