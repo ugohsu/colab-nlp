@@ -146,16 +146,22 @@ class CorpusDB:
             
         print(f"Registered {added_count} new files. (Total found: {len(paths)})")
 
-    def process_queue(self, tokenize_fn):
+    def process_queue(self, tokenize_fn=None, *, fetch_only: bool = False):
         """
         未処理のファイルを順次処理するメインループ。
         
         Parameters
         ----------
-        tokenize_fn : function
+        tokenize_fn : function, optional
+            fetch_only=False の場合は必須。
             pandas.DataFrame (columns=[doc_id, text]) を受け取り、
             tokens DataFrame を返す関数。
+        fetch_only : bool
+            True の場合、テキスト読み込みとDB保存だけ行い、形態素解析はスキップする。
         """
+        if not fetch_only and tokenize_fn is None:
+            raise ValueError("tokenize_fn must be provided unless fetch_only=True")
+
         # 未処理（tokenize_ok=0）の doc_id を取得
         with self._connect() as con:
             target_ids = pd.read_sql(
@@ -164,11 +170,11 @@ class CorpusDB:
             )["doc_id"].tolist()
 
         total = len(target_ids)
-        print(f"Processing {total} documents...")
+        print(f"Processing {total} documents (fetch_only={fetch_only})...")
 
         for i, doc_id in enumerate(target_ids, start=1):
             try:
-                self._process_one(doc_id, tokenize_fn)
+                self._process_one(doc_id, tokenize_fn, fetch_only=fetch_only)
                 if i % 100 == 0:
                     print(f"Progress: {i}/{total} done.")
             except Exception as e:
@@ -178,8 +184,8 @@ class CorpusDB:
 
         print("Queue processing finished.")
 
-    def _process_one(self, doc_id, tokenize_fn):
-        """1文書に対する処理（読込 -> 解析 -> 保存）"""
+    def _process_one(self, doc_id, tokenize_fn, fetch_only=False):
+        """1文書に対する処理（読込 -> [解析] -> 保存）"""
         
         # 1. パスを取得（都度接続）
         with self._connect() as con:
@@ -197,6 +203,25 @@ class CorpusDB:
             text = Path(path_str).read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             raise IOError(f"Failed to read file: {path_str}") from e
+
+        # ===== 追加: fetch_only の場合 =====
+        if fetch_only:
+            with self._connect() as con:
+                now = datetime.now().isoformat()
+                # text テーブルへ保存
+                con.execute(
+                    "INSERT OR REPLACE INTO text (doc_id, char_count, text) VALUES (?, ?, ?)",
+                    (doc_id, len(text), text)
+                )
+                # status 更新 (fetch_ok=1, tokenize_ok=0)
+                con.execute("""
+                    UPDATE status 
+                    SET fetched_at = ?, fetch_ok = 1, updated_at = ?, error_message = NULL
+                    WHERE doc_id = ?
+                """, (now, now, doc_id))
+                con.commit()
+            return
+        # ===================================
 
         # 3. 形態素解析用 DataFrame 作成
         # colab-nlp の tokenize_df は 'text' 列と ID列 を期待する

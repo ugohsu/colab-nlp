@@ -142,6 +142,28 @@ db.reprocess_tokens(new_tokenizer)
 
 ---
 
+## Tips: 大規模データの段階的構築 (Fetch First)
+
+原則として `process_queue` は「ファイル読み込み」と「形態素解析」を同時に行いますが、数万件以上のファイルを扱う場合は、処理を分けることで安全性が高まります。
+
+`fetch_only=True` オプションを使用すると、まずはテキストの保存だけを完了させ（Fetch）、後から `reprocess_tokens` で解析を行うことができます。
+
+**メリット:**
+
+* 外部要因（通信エラー等）で止まっても、取得済みのテキストは無駄にならない。
+* 取得完了後は、`reprocess_tokens` の高速な並列バッチ処理を活用できる。
+
+```python
+# 1. まずテキスト取得だけを行う (解析はスキップ)
+#    ※ tokenize_fn は不要です
+db.process_queue(fetch_only=True)
+
+# 2. その後、DB内のデータを使って一気に解析
+db.reprocess_tokens(my_tokenizer)
+```
+
+---
+
 ## 構築したデータの利用方法
 
 作成された corpus.db は SQLite 形式です。pandas と sqlite3 を使って簡単にデータを抽出できます。
@@ -308,11 +330,12 @@ for start_id in range(1, max_id + 1, chunk_size):
   - `root_dir` (str | Path): 走査対象のルートディレクトリ。
   - `exts` (tuple | list): 対象とする拡張子のリスト（例: `["*.txt", "*.md"]`）。
 
-#### `process_queue(self, tokenize_fn)`
+#### `process_queue(self, tokenize_fn=None, *, fetch_only=False)`
 未処理（`tokenize_ok=0`）のファイルを順次読み込み、解析して保存します。ファイルアクセスを伴います。
 
 - **Parameters**
-  - `tokenize_fn` (callable): `DataFrame(columns=[doc_id, text])` を受け取り、`DataFrame(columns=[doc_id, word, pos, ...])` を返す関数。
+  - `tokenize_fn` (callable, optional): `fetch_only=False` の場合は必須。`DataFrame(columns=[doc_id, text])` を受け取り、`DataFrame(columns=[doc_id, token_id, word, pos, ...])` を返す関数。
+  - `fetch_only` (bool): `True` の場合、テキスト読み込みと DB 保存だけをおこない、形態素解析はスキップする。
 
 #### `reset_tokens(self, doc_ids=None, *, vacuum=False, reset_only_fetched=True)`
 解析結果（`tokens`）を削除し、ステータス（`tokenize_ok`）を未完了（0）に戻します。
