@@ -65,7 +65,7 @@ fatal: destination path 'colab-common' already exists
 | 分類 | 関数名 | 内容 | 実装ファイル | 解説ドキュメント |
 | :--- | :--- | :--- | :--- | :--- |
 | **I/O** | `CorpusDB` | 大規模テキストデータのDB化・管理（省メモリ・中断再開可） | [`colab_nlp/corpus_db.py`](./colab_nlp/corpus_db.py) | [`docs/corpus_db.md`](./docs/corpus_db.md) |
-| **I/O** | `corpus_reader` | 大規模DBからトークンを逐次読み込み（ジェネレータ） | [`colab_nlp/corpus_db.py`](./colab_nlp/corpus_db.py) | [`docs/bow/ngram.md`](./docs/bow/ngram.md) |
+| **I/O** | `corpus_reader` | 大規模DBからトークンを逐次読み込み（ジェネレータ） | [`colab_nlp/corpus_db.py`](./colab_nlp/corpus_db.py) | [`docs/corpus_db.md`](./docs/corpus_db.md) |
 | **前処理** | `tokenize_df` | 文書DFを形態素解析し、縦持ち（1行1語）形式に変換 | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
 | **前処理** | `tokenize_text_janome` | Janomeを用いて1つの文字列をトークン化（内部・単体用） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
 | **前処理** | `tokenize_text_sudachi` | Sudachiを用いて1つの文字列をトークン化（内部・単体用） | [`colab_nlp/preprocess.py`](./colab_nlp/preprocess.py) | [`docs/tokenization.md`](./docs/tokenization.md) |
