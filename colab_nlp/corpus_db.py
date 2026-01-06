@@ -162,10 +162,14 @@ class CorpusDB:
         if not fetch_only and tokenize_fn is None:
             raise ValueError("tokenize_fn must be provided unless fetch_only=True")
 
-        # 未処理（tokenize_ok=0）の doc_id を取得
+        # 未処理の doc_id を取得
+        # fetch_only=True なら「未取得(fetch_ok=0)」を対象にする
+        # fetch_only=False なら「未解析(tokenize_ok=0)」を対象にする（取得済み未解析も含む）
+        target_condition = "fetch_ok = 0" if fetch_only else "tokenize_ok = 0"
+
         with self._connect() as con:
             target_ids = pd.read_sql(
-                "SELECT doc_id FROM status WHERE tokenize_ok = 0 ORDER BY doc_id", 
+                f"SELECT doc_id FROM status WHERE {target_condition} ORDER BY doc_id", 
                 con
             )["doc_id"].tolist()
 
