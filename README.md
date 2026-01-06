@@ -145,7 +145,7 @@ fatal: destination path 'colab-common' already exists
 
 ---
 
-### 3. N-gram
+### 4. N-gram
 
 - 隣り合うN個の単語（Bigram, Trigram...）の出現頻度
 - 複合語（「人工」+「知能」）の発見や文脈の把握
@@ -156,7 +156,7 @@ fatal: destination path 'colab-common' already exists
 
 ---
 
-### 4. 出力・共有・保存
+### 5. 出力・共有・保存
 
 - 内容
     - 分析結果の出力
