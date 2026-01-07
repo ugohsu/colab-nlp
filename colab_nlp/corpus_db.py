@@ -11,31 +11,83 @@ from typing import Callable, Optional, Sequence, Union, Generator, Iterable, Tup
 # ===========================================================
 
 class CorpusDB:
-    def __init__(self, db_path="corpus.db"):
+    def __init__(self, db_path="corpus.db", master_db_path: Optional[str] = None):
         """
         初期化: DBパスを指定し、テーブルが存在しなければ作成する。
+
+        Parameters
+        ----------
+        db_path : str
+            作業用DB（work）。tokens/status_tokenize を保存する。
+            master_db_path が None の場合は、documents/text/status_fetch もここに作成する（一元管理）。
+        master_db_path : str, optional
+            参照/本文管理用DB（master）。documents/text/status_fetch を保存する（分離管理）。
         """
         self.db_path = db_path
+        self.master_db_path = master_db_path
+        self.master_prefix = "master." if self.master_db_path else ""
         self._create_tables()
 
     def _connect(self):
-        """DB接続を行い、外部キー制約を有効化して返す"""
+        """
+        DB接続を行う。
+        - 常に work(db_path) に接続する
+        - master_db_path が指定されている場合は ATTACH する
+        """
         con = sqlite3.connect(self.db_path)
+        
+        # 外部キー制約を有効化
+        # ※ 注意: Splitモード（DBが分かれている場合）、DBを跨ぐテーブル間（tokens -> documents等）には
+        #   SQLiteの仕様上 FK制約を張れないため、スキーマ定義側で FK を除外して対応している。
+        #   ただし、同一DB内のテーブル間（status_fetch -> documents等）の整合性を保つため常に ON にする。
         con.execute("PRAGMA foreign_keys = ON;")
+        
+        if self.master_db_path:
+            # パス内のシングルクォートをエスケープ（SQLインジェクション対策）
+            safe_path = self.master_db_path.replace("'", "''")
+            # ATTACH 名は固定で master（SQLが読みやすい）
+            con.execute(f"ATTACH DATABASE '{safe_path}' AS master")
         return con
+
+    # --- テーブル名アクセサ（SQL内の直書きを避ける） ---
+    @property
+    def t_docs(self) -> str:
+        return f"{self.master_prefix}documents"
+
+    @property
+    def t_text(self) -> str:
+        return f"{self.master_prefix}text"
+
+    @property
+    def t_status_fetch(self) -> str:
+        return f"{self.master_prefix}status_fetch"
+
+    @property
+    def t_tokens(self) -> str:
+        return "tokens"
+
+    @property
+    def t_status_tokenize(self) -> str:
+        return "status_tokenize"
 
     def _create_tables(self):
         """
         テーブル初期化
         - documents: ファイルパス管理
-        - status: 進捗管理
+        - status_fetch: fetch 進捗管理
+        - status_tokenize: tokenize 進捗管理
         - text: 原文データ
         - tokens: 形態素解析結果
         """
         with self._connect() as con:
+            # ----------------------------
+            # Master側（documents/text/status_fetch）
+            # - master_db_path がある場合は master.* に作成
+            # - 無い場合は main（work）に作成（一元管理）
+            # ----------------------------
             # 1. documents
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS documents (
+            con.execute(f"""
+                CREATE TABLE IF NOT EXISTS {self.t_docs} (
                     doc_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     abs_path TEXT UNIQUE,
                     rel_path TEXT,
@@ -43,13 +95,12 @@ class CorpusDB:
                 );
             """)
 
-            # 2. status
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS status (
+            # 2. status_fetch（fetch のみ）
+            con.execute(f"""
+                CREATE TABLE IF NOT EXISTS {self.t_status_fetch} (
                     doc_id INTEGER PRIMARY KEY,
                     fetched_at TEXT,
                     fetch_ok INTEGER DEFAULT 0,
-                    tokenize_ok INTEGER DEFAULT 0,
                     error_message TEXT,
                     updated_at TEXT,
                     FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
@@ -57,8 +108,8 @@ class CorpusDB:
             """)
 
             # 3. text
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS text (
+            con.execute(f"""
+                CREATE TABLE IF NOT EXISTS {self.t_text} (
                     doc_id INTEGER PRIMARY KEY,
                     char_count INTEGER,
                     text TEXT,
@@ -66,31 +117,82 @@ class CorpusDB:
                 );
             """)
 
-            # 4. tokens
+            # ----------------------------
+            # Work側（tokens/status_tokenize）
+            # ----------------------------
+            # 4. tokens（work固定）
             # PRIMARY KEY (doc_id, token_id) を追加して一意性を担保
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS tokens (
-                    doc_id INTEGER,
-                    token_id INTEGER,
-                    word TEXT,
-                    pos TEXT,
-                    token_info TEXT,
-                    PRIMARY KEY (doc_id, token_id),
-                    FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
-                );
-            """)
+            # 分離管理では documents が master 側のため、tokens には FK を張らない（DB跨ぎFK不可）。
+            if self.master_db_path:
+                con.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.t_tokens} (
+                        doc_id INTEGER,
+                        token_id INTEGER,
+                        word TEXT,
+                        pos TEXT,
+                        token_info TEXT,
+                        PRIMARY KEY (doc_id, token_id)
+                    );
+                """)
+            else:
+                con.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.t_tokens} (
+                        doc_id INTEGER,
+                        token_id INTEGER,
+                        word TEXT,
+                        pos TEXT,
+                        token_info TEXT,
+                        PRIMARY KEY (doc_id, token_id),
+                        FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
+                    );
+                """)
+
+            # 5. status_tokenize（tokenize のみ / work固定）
+            if self.master_db_path:
+                con.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.t_status_tokenize} (
+                        doc_id INTEGER PRIMARY KEY,
+                        tokenize_ok INTEGER DEFAULT 0,
+                        error_message TEXT,
+                        updated_at TEXT
+                    );
+                """)
+            else:
+                con.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.t_status_tokenize} (
+                        doc_id INTEGER PRIMARY KEY,
+                        tokenize_ok INTEGER DEFAULT 0,
+                        error_message TEXT,
+                        updated_at TEXT,
+                        FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
+                    );
+                """)
 
             # インデックス作成（検索・結合の高速化用）
-            con.execute("CREATE INDEX IF NOT EXISTS idx_tokens_doc_id ON tokens(doc_id);")
-            con.execute("CREATE INDEX IF NOT EXISTS idx_tokens_word ON tokens(word);")
+            con.execute(f"CREATE INDEX IF NOT EXISTS idx_tokens_doc_id ON {self.t_tokens}(doc_id);")
+            con.execute(f"CREATE INDEX IF NOT EXISTS idx_tokens_word ON {self.t_tokens}(word);")
             
             # 【追加】品詞 (pos) 検索用インデックス
-            con.execute("CREATE INDEX IF NOT EXISTS idx_tokens_pos ON tokens(pos);")
+            con.execute(f"CREATE INDEX IF NOT EXISTS idx_tokens_pos ON {self.t_tokens}(pos);")
+
+            # status_tokenize 参照高速化（JOIN/WHERE用）
+            con.execute(f"CREATE INDEX IF NOT EXISTS idx_status_tokenize_ok ON {self.t_status_tokenize}(tokenize_ok);")
+            
+            # status_fetch 参照高速化（JOIN/WHERE用）
+            # splitモードでは status_fetch は master 側にあるため、index も master 側に作る構文が必要
+            if self.master_db_path:
+                # CREATE INDEX master.<index_name> ON <table_name>(...)
+                con.execute("CREATE INDEX IF NOT EXISTS master.idx_status_fetch_ok ON status_fetch(fetch_ok);")
+            else:
+                con.execute(f"CREATE INDEX IF NOT EXISTS idx_status_fetch_ok ON {self.t_status_fetch}(fetch_ok);")
 
     def register_files(self, root_dir, exts=("*.txt",)):
         """
         指定ディレクトリ以下のファイルを走査し、パス情報をDBに登録する。
         （中身は読み込まないため軽量）
+        
+        Note:
+            master_db_path が指定されている場合、Master DB (documents 等) が更新されます。
         
         Parameters
         ----------
@@ -123,15 +225,29 @@ class CorpusDB:
                 
                 # 【修正】INSERT OR IGNORE で一発登録（高速化・簡素化）
                 cur = con.execute(
-                    "INSERT OR IGNORE INTO documents (abs_path, rel_path, created_at) VALUES (?, ?, ?)",
+                    f"INSERT OR IGNORE INTO {self.t_docs} (abs_path, rel_path, created_at) VALUES (?, ?, ?)",
                     (abs_p, rel_p, now)
                 )
                 
                 # 新規登録された場合のみ (rowcount > 0) status を初期化
                 if cur.rowcount > 0:
-                    doc_id = cur.lastrowid
+                    # lastrowid は ATTACH あり環境で安全でないことがあるため abs_path から引き直す
+                    row = con.execute(
+                        f"SELECT doc_id FROM {self.t_docs} WHERE abs_path = ?",
+                        (abs_p,)
+                    ).fetchone()
+                    if not row:
+                        continue
+                    doc_id = row[0]
+
+                    # status_fetch 初期化（master/単一のどちらでも self.t_status_fetch）
                     con.execute(
-                        "INSERT INTO status (doc_id, fetch_ok, tokenize_ok) VALUES (?, 0, 0)",
+                        f"INSERT OR IGNORE INTO {self.t_status_fetch} (doc_id, fetch_ok) VALUES (?, 0)",
+                        (doc_id,)
+                    )
+                    # status_tokenize 初期化（work固定）
+                    con.execute(
+                        f"INSERT OR IGNORE INTO {self.t_status_tokenize} (doc_id, tokenize_ok) VALUES (?, 0)",
                         (doc_id,)
                     )
                     added_count += 1
@@ -151,6 +267,9 @@ class CorpusDB:
         イテレータからデータを順次読み込み、指定バッチサイズごとにDBへ登録する（省メモリ版）。
         ※ 重複データ（同じ abs_path）があっても、正しく既存の doc_id を再利用して上書きします。
         
+        Note:
+            master_db_path が指定されている場合、Master DB (documents 等) が更新されます。
+
         Parameters
         ----------
         iterator : iterable
@@ -210,13 +329,13 @@ class CorpusDB:
             # 1. documents テーブルへ登録 (IDは自動採番におまかせ)
             #    すでに存在する場合は IGNORE で何もしない (既存IDが維持される)
             con.execute(
-                "INSERT OR IGNORE INTO documents (abs_path, rel_path, created_at) VALUES (?, ?, ?)",
+                f"INSERT OR IGNORE INTO {self.t_docs} (abs_path, rel_path, created_at) VALUES (?, ?, ?)",
                 (abs_path, str(original_id), now)
             )
             
             # 2. 正しい doc_id を取得 (これが最も確実)
             #    abs_path は UNIQUE なので必ず1つ特定できる
-            cur = con.execute("SELECT doc_id FROM documents WHERE abs_path = ?", (abs_path,))
+            cur = con.execute(f"SELECT doc_id FROM {self.t_docs} WHERE abs_path = ?", (abs_path,))
             row = cur.fetchone()
             
             if not row:
@@ -224,10 +343,13 @@ class CorpusDB:
                 
             doc_id = row[0]
 
-            # 【追加修正】status 行が確実に存在するように初期化 (堅牢性向上)
-            # documents があって status がない状態を防ぐ
+            # status_fetch / status_tokenize を確実に作成（ハイブリッド統一）
             con.execute(
-                "INSERT OR IGNORE INTO status (doc_id, fetch_ok, tokenize_ok) VALUES (?, 0, 0)",
+                f"INSERT OR IGNORE INTO {self.t_status_fetch} (doc_id, fetch_ok) VALUES (?, 0)",
+                (doc_id,)
+            )
+            con.execute(
+                f"INSERT OR IGNORE INTO {self.t_status_tokenize} (doc_id, tokenize_ok) VALUES (?, 0)",
                 (doc_id,)
             )
             
@@ -238,20 +360,33 @@ class CorpusDB:
                 text_body
             ))
             data_status.append((
-                doc_id,
-                now, 1, 0, now  # fetch_ok=1, tokenize_ok=0
+                doc_id, now, 1, now  # fetched_at, fetch_ok, updated_at
             ))
 
         # 4. コンテンツの一括書き込み
-        #    text/status は上書き(REPLACE)して最新状態にする
-        con.executemany(
-            "INSERT OR REPLACE INTO text (doc_id, char_count, text) VALUES (?, ?, ?)",
-            data_text
-        )
-        con.executemany(
-            "INSERT OR REPLACE INTO status (doc_id, fetched_at, fetch_ok, tokenize_ok, updated_at) VALUES (?, ?, ?, ?, ?)",
-            data_status
-        )
+        if data_text:
+            # text/status は上書き(REPLACE)して最新状態にする
+            con.executemany(
+                f"INSERT OR REPLACE INTO {self.t_text} (doc_id, char_count, text) VALUES (?, ?, ?)",
+                data_text
+            )
+            con.executemany(
+                f"INSERT OR REPLACE INTO {self.t_status_fetch} (doc_id, fetched_at, fetch_ok, updated_at) VALUES (?, ?, ?, ?)",
+                data_status
+            )
+            
+            # 【追加】本文更新に伴い、tokenize_ok をリセットする（再解析待ちにする）
+            doc_ids = [row[0] for row in data_text]
+            ph = ",".join(["?"] * len(doc_ids))
+            con.execute(
+                f"""
+                UPDATE {self.t_status_tokenize}
+                SET tokenize_ok = 0, updated_at = ?, error_message = NULL
+                WHERE doc_id IN ({ph})
+                """,
+                [now, *doc_ids]
+            )
+
         con.commit()
         
         # 【修正】実際に処理した件数を返す
@@ -276,21 +411,36 @@ class CorpusDB:
         # 未処理の doc_id を取得
         # fetch_only=True なら「未取得(fetch_ok=0)」を対象にする
         # fetch_only=False なら「未解析(tokenize_ok=0)」を対象にする（取得済み未解析も含む）
-        # 【修正】JOIN 用にエイリアス s を付与
-        target_condition = "s.fetch_ok = 0" if fetch_only else "s.tokenize_ok = 0"
+        # status_fetch / status_tokenize に分割
+        if fetch_only:
+            target_condition = "sf.fetch_ok = 0"
+        else:
+            target_condition = "st.tokenize_ok = 0"
 
         with self._connect() as con:
             # 【修正】imported:// などの仮想パスを対象外にするフィルタを追加
             #  process_queue はファイル読み込みを伴うため、実ファイル以外は処理してはならない
             # 【A案対応】file:// も含め、スキーム(://)を持つパスは一律除外する（シンプル化）
-            query = f"""
-                SELECT s.doc_id 
-                FROM status s
-                JOIN documents d ON s.doc_id = d.doc_id
-                WHERE {target_condition}
-                  AND d.abs_path NOT LIKE '%://%'
-                ORDER BY s.doc_id
-            """
+            if fetch_only:
+                query = f"""
+                    SELECT sf.doc_id 
+                    FROM {self.t_status_fetch} sf
+                    JOIN {self.t_docs} d ON sf.doc_id = d.doc_id
+                    WHERE {target_condition}
+                      AND d.abs_path NOT LIKE '%://%'
+                    ORDER BY sf.doc_id
+                """
+            else:
+                query = f"""
+                    SELECT st.doc_id 
+                    FROM {self.t_status_tokenize} st
+                    JOIN {self.t_status_fetch} sf ON st.doc_id = sf.doc_id
+                    JOIN {self.t_docs} d ON st.doc_id = d.doc_id
+                    WHERE sf.fetch_ok = 1
+                      AND {target_condition}
+                      AND d.abs_path NOT LIKE '%://%'
+                    ORDER BY st.doc_id
+                """
             target_ids = pd.read_sql(query, con)["doc_id"].tolist()
 
         total = len(target_ids)
@@ -303,8 +453,9 @@ class CorpusDB:
                     print(f"Progress: {i}/{total} done.")
             except Exception as e:
                 print(f"Error at doc_id={doc_id}: {e}")
-                # エラー情報をDBに記録
-                self._log_error(doc_id, e)
+                # エラー情報をDBに記録（fetch_only or IOError は fetch 側、その他は tokenize 側）
+                stage = "fetch" if fetch_only or isinstance(e, IOError) else "tokenize"
+                self._log_error(doc_id, e, stage=stage)
 
         print("Queue processing finished.")
 
@@ -314,7 +465,7 @@ class CorpusDB:
         # 1. パスを取得（都度接続）
         with self._connect() as con:
             row = con.execute(
-                "SELECT abs_path FROM documents WHERE doc_id = ?", (doc_id,)
+                f"SELECT abs_path FROM {self.t_docs} WHERE doc_id = ?", (doc_id,)
             ).fetchone()
         
         if not row:
@@ -348,15 +499,18 @@ class CorpusDB:
                 now = datetime.now().isoformat()
                 # text テーブルへ保存
                 con.execute(
-                    "INSERT OR REPLACE INTO text (doc_id, char_count, text) VALUES (?, ?, ?)",
+                    f"INSERT OR REPLACE INTO {self.t_text} (doc_id, char_count, text) VALUES (?, ?, ?)",
                     (doc_id, len(text), text)
                 )
-                # status 更新 (fetch_ok=1, tokenize_ok=0)
-                con.execute("""
-                    UPDATE status 
+                # status_fetch 更新 (fetch_ok=1)
+                con.execute(
+                    f"""
+                    UPDATE {self.t_status_fetch} 
                     SET fetched_at = ?, fetch_ok = 1, updated_at = ?, error_message = NULL
                     WHERE doc_id = ?
-                """, (now, now, doc_id))
+                    """,
+                    (now, now, doc_id),
+                )
                 con.commit()
             return
         # ===================================
@@ -426,17 +580,17 @@ class CorpusDB:
 
             # text テーブルへ保存
             con.execute(
-                "INSERT OR REPLACE INTO text (doc_id, char_count, text) VALUES (?, ?, ?)",
+                f"INSERT OR REPLACE INTO {self.t_text} (doc_id, char_count, text) VALUES (?, ?, ?)",
                 (doc_id, len(text), text)
             )
 
             # tokens テーブルへ保存
             # 再実行時の重複防止：先に既存のトークンを消す（空トークン時も残留させない）
-            con.execute("DELETE FROM tokens WHERE doc_id = ?", (doc_id,))
+            con.execute(f"DELETE FROM {self.t_tokens} WHERE doc_id = ?", (doc_id,))
             
             if not df_tokens.empty:
                 df_tokens.to_sql(
-                    "tokens",
+                    self.t_tokens,
                     con,
                     if_exists="append",
                     index=False,
@@ -444,23 +598,36 @@ class CorpusDB:
                     chunksize=5000
                 )
 
-            # status 更新（完了）
-            # ここまで到達できた場合のみ fetch_ok=1, tokenize_ok=1 とする
-            con.execute("""
-                UPDATE status 
-                SET fetched_at = ?, fetch_ok = 1, tokenize_ok = 1, updated_at = ?, error_message = NULL
+            # status_fetch（fetch 成功）を更新
+            con.execute(
+                f"""
+                UPDATE {self.t_status_fetch}
+                SET fetched_at = ?, fetch_ok = 1, updated_at = ?, error_message = NULL
                 WHERE doc_id = ?
-            """, (now, now, doc_id))
+                """,
+                (now, now, doc_id),
+            )
+
+            # status_tokenize（tokenize 成功）を更新
+            con.execute(
+                f"""
+                UPDATE {self.t_status_tokenize}
+                SET tokenize_ok = 1, updated_at = ?, error_message = NULL
+                WHERE doc_id = ?
+                """,
+                (now, doc_id),
+            )
             
             con.commit()
 
-    def _log_error(self, doc_id, exception):
-        """エラー発生時のログ記録"""
+    def _log_error(self, doc_id, exception, *, stage: str = "tokenize"):
+        """エラー発生時のログ記録（stage: 'fetch' or 'tokenize'）"""
         msg = "".join(traceback.format_exception(None, exception, exception.__traceback__))
         now = datetime.now().isoformat()
+        table = self.t_status_fetch if stage == "fetch" else self.t_status_tokenize
         with self._connect() as con:
             con.execute(
-                "UPDATE status SET error_message = ?, updated_at = ? WHERE doc_id = ?",
+                f"UPDATE {table} SET error_message = ?, updated_at = ? WHERE doc_id = ?",
                 (msg, now, doc_id)
             )
             con.commit()
@@ -468,6 +635,25 @@ class CorpusDB:
     # ==================================================================
     # ここから【新規追加メソッド】のみ
     # ==================================================================
+
+    def sync_status_from_master(self):
+        """
+        [Splitモード用] Master DB の情報を基に Work DB の status_tokenize を初期化する。
+        既存の Master DB に対して、新規に Work DB を作成した場合などに使用する。
+        """
+        if not self.master_db_path:
+            print("This method is for split mode (master_db_path) only.")
+            return
+
+        print("Syncing status_tokenize from master...")
+        with self._connect() as con:
+            # master.status_fetch にある doc_id を work.status_tokenize に登録
+            con.execute(f"""
+                INSERT OR IGNORE INTO {self.t_status_tokenize} (doc_id, tokenize_ok)
+                SELECT doc_id, 0 FROM {self.t_status_fetch}
+            """)
+            con.commit()
+        print("Done.")
 
     def reset_tokens(
         self,
@@ -501,22 +687,26 @@ class CorpusDB:
         with self._connect() as con:
             if doc_ids is None:
                 # 全消去
-                con.execute("DELETE FROM tokens")
+                con.execute(f"DELETE FROM {self.t_tokens}")
 
-                # tokenize_ok を戻す範囲
+                # tokenize_ok を戻す（status_tokenize のみ）
                 if reset_only_fetched:
+                    # fetch_ok=1 の文書のみ対象
                     con.execute(
-                        """
-                        UPDATE status
+                        f"""
+                        UPDATE {self.t_status_tokenize}
                         SET tokenize_ok = 0, updated_at = ?, error_message = NULL
-                        WHERE fetch_ok = 1
+                        WHERE doc_id IN (
+                            SELECT doc_id FROM {self.t_status_fetch} WHERE fetch_ok = 1
+                        )
                         """,
                         (now,),
                     )
                 else:
+                    # 全件対象
                     con.execute(
-                        """
-                        UPDATE status
+                        f"""
+                        UPDATE {self.t_status_tokenize}
                         SET tokenize_ok = 0, updated_at = ?, error_message = NULL
                         """,
                         (now,),
@@ -530,11 +720,11 @@ class CorpusDB:
 
                 ph = _placeholders(len(doc_ids))
 
-                con.execute(f"DELETE FROM tokens WHERE doc_id IN ({ph})", doc_ids)
+                con.execute(f"DELETE FROM {self.t_tokens} WHERE doc_id IN ({ph})", doc_ids)
 
                 con.execute(
                     f"""
-                    UPDATE status
+                    UPDATE {self.t_status_tokenize}
                     SET tokenize_ok = 0, updated_at = ?, error_message = NULL
                     WHERE doc_id IN ({ph})
                     """,
@@ -570,14 +760,16 @@ class CorpusDB:
         with self._connect() as con:
             if doc_ids is None:
                 df = pd.read_sql(
-                    """
-                    SELECT s.doc_id,
+                    f"""
+                    SELECT st.doc_id,
                            t.text,
                            t.char_count
-                    FROM status s
-                    JOIN text t ON t.doc_id = s.doc_id
-                    WHERE s.fetch_ok = 1 AND s.tokenize_ok = 0
-                    ORDER BY s.doc_id
+                    FROM {self.t_status_tokenize} st
+                    JOIN {self.t_status_fetch} sf ON sf.doc_id = st.doc_id
+                    JOIN {self.t_text} t ON t.doc_id = st.doc_id
+                    WHERE sf.fetch_ok = 1
+                      AND st.tokenize_ok = 0
+                    ORDER BY st.doc_id
                     """,
                     con,
                 )
@@ -589,14 +781,16 @@ class CorpusDB:
                 ph = ",".join(["?"] * len(doc_ids))
                 df = pd.read_sql(
                     f"""
-                    SELECT s.doc_id,
+                    SELECT st.doc_id,
                            t.text,
                            t.char_count
-                    FROM status s
-                    JOIN text t ON t.doc_id = s.doc_id
-                    WHERE s.fetch_ok = 1 AND s.tokenize_ok = 0
-                      AND s.doc_id IN ({ph})
-                    ORDER BY s.doc_id
+                    FROM {self.t_status_tokenize} st
+                    JOIN {self.t_status_fetch} sf ON sf.doc_id = st.doc_id
+                    JOIN {self.t_text} t ON t.doc_id = st.doc_id
+                    WHERE sf.fetch_ok = 1
+                      AND st.tokenize_ok = 0
+                      AND st.doc_id IN ({ph})
+                    ORDER BY st.doc_id
                     """,
                     con,
                     params=doc_ids,
@@ -649,7 +843,7 @@ class CorpusDB:
                     try:
                         self._reprocess_batch(df_single, tokenize_fn)
                     except Exception as e2:
-                        self._log_error(row.doc_id, e2)
+                        self._log_error(row.doc_id, e2, stage="tokenize")
 
             done_docs += batch_docs
             done_chars += batch_chars
@@ -736,11 +930,11 @@ class CorpusDB:
             ids = batch_df["doc_id"].tolist()
             ph = ",".join(["?"] * len(ids))
 
-            con.execute(f"DELETE FROM tokens WHERE doc_id IN ({ph})", ids)
+            con.execute(f"DELETE FROM {self.t_tokens} WHERE doc_id IN ({ph})", ids)
 
             if not df_tokens.empty:
                 df_tokens.to_sql(
-                    "tokens",
+                    self.t_tokens,
                     con,
                     if_exists="append",
                     index=False,
@@ -751,7 +945,7 @@ class CorpusDB:
             now = datetime.now().isoformat()
             con.execute(
                 f"""
-                UPDATE status
+                UPDATE {self.t_status_tokenize}
                 SET tokenize_ok = 1, updated_at = ?, error_message = NULL
                 WHERE doc_id IN ({ph})
                 """,

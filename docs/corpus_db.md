@@ -266,7 +266,7 @@ db_path = "/content/drive/MyDrive/nlp_data/my_corpus.db"
 with sqlite3.connect(db_path) as con:
     df_err = pd.read_sql("""
         SELECT d.abs_path
-        FROM status s
+        FROM status_fetch s
         JOIN documents d ON s.doc_id = d.doc_id
         WHERE s.fetch_ok = 0 
           AND s.error_message IS NOT NULL
@@ -296,6 +296,55 @@ db.process_queue(my_tokenizer)
 ```
 
 ---
+
+## Advanced: データベースの分離運用 (Master/Work 構成)
+
+大規模なデータ分析では、**「テキストデータ管理（読み取り専用）」** と **「解析作業（書き込み・試行錯誤）」** を分けたい場合があります。
+
+* **Master DB**: 文書情報や原文テキストを格納。チームで共有する「正本」として扱う。
+* **Work DB**: 形態素解析結果（tokens）や進捗情報を格納。分析ごとに使い捨てる、あるいは個人ごとに作成する。
+
+`CorpusDB` は、`master_db_path` を指定することでこの分離構成に対応しています。
+
+### 1. 初期化と接続
+
+Work DB（書き込み先）と Master DB（参照先）をそれぞれ指定して初期化します。
+
+```python
+# Master DB: すでに構築済みのデータセット（documents, text, status_fetch を含む）
+master_path = "/content/drive/MyDrive/shared_data/master_corpus.db"
+
+# Work DB: 今回の分析用（tokens, status_tokenize をここに保存）
+work_path = "my_analysis_v1.db"
+
+# Master を参照しながら Work を初期化
+db = CorpusDB(db_path=work_path, master_db_path=master_path)
+
+```
+
+### 2. 解析ステータスの同期（重要）
+
+Work DB を新しく作った直後は、どの文書を解析すべきかという情報（`status_tokenize`）が空の状態です。
+Master DB に登録されている文書リストを取り込み、解析待ち状態にするために **`sync_status_from_master()`** を実行します。
+
+```python
+# Master の文書一覧を Work の解析待ちリストにコピー
+db.sync_status_from_master()
+
+```
+
+### 3. 解析の実行
+
+あとは通常通り `reprocess_tokens` を実行します。原文は Master から読み込まれ、解析結果は Work に保存されます。
+
+```python
+# DB内のテキスト（Master）を使って解析し、結果を Work に保存
+db.reprocess_tokens(my_tokenizer)
+
+```
+
+---
+
 
 ## 構築したデータの利用方法
 
@@ -401,7 +450,14 @@ for start_id in range(1, max_id + 1, chunk_size):
 
 `CorpusDB` が作成・管理する SQLite データベースのテーブル定義です。
 
-#### `documents` テーブル
+* **通常運用（一元管理）**: すべてのテーブルが1つのデータベースファイルに作成されます。
+* **分離運用（Master/Work）**: 役割に応じて2つのデータベースに分散して保存されます。
+
+#### Master 側（データ管理用）
+
+このグループは、分離運用時には **Master DB** に配置されます。
+
+##### `documents` テーブル
 
 ファイルパスなどのメタデータを管理します。
 
@@ -412,20 +468,7 @@ for start_id in range(1, max_id + 1, chunk_size):
 | `rel_path` | `TEXT` |  | `register_files` 実行時のルートディレクトリからの相対パス |
 | `created_at` | `TEXT` |  | 登録日時（ISO 8601形式） |
 
-#### `status` テーブル
-
-各文書の処理進捗とエラー状態を管理します。
-
-| カラム名 | 型 | 制約 | 説明 |
-| --- | --- | --- | --- |
-| `doc_id` | `INTEGER` | `PK`, `FK` | `documents.doc_id` への外部キー |
-| `fetched_at` | `TEXT` |  | テキスト取得（ファイル読み込み）完了日時 |
-| `fetch_ok` | `INTEGER` | `DEFAULT 0` | テキスト取得成功フラグ（0:未, 1:済） |
-| `tokenize_ok` | `INTEGER` | `DEFAULT 0` | 形態素解析成功フラグ（0:未, 1:済） |
-| `error_message` | `TEXT` |  | エラー発生時のトレースバック情報 |
-| `updated_at` | `TEXT` |  | 最終更新日時 |
-
-#### `text` テーブル
+##### `text` テーブル
 
 読み込んだ原文テキストを格納します。
 
@@ -435,17 +478,49 @@ for start_id in range(1, max_id + 1, chunk_size):
 | `char_count` | `INTEGER` |  | 文字数 |
 | `text` | `TEXT` |  | 原文テキストデータ |
 
-#### `tokens` テーブル
+##### `status_fetch` テーブル
+
+テキスト取得（ファイル読み込み）の進捗とエラー状態を管理します。
+
+| カラム名 | 型 | 制約 | 説明 |
+| --- | --- | --- | --- |
+| `doc_id` | `INTEGER` | `PK`, `FK` | `documents.doc_id` への外部キー |
+| `fetched_at` | `TEXT` |  | テキスト取得完了日時 |
+| `fetch_ok` | `INTEGER` | `DEFAULT 0` | 取得成功フラグ（0:未, 1:済） |
+| `error_message` | `TEXT` |  | エラー発生時のトレースバック情報 |
+| `updated_at` | `TEXT` |  | 最終更新日時 |
+
+#### Work 側（解析作業用）
+
+このグループは、分離運用時には **Work DB** に配置されます。
+
+##### `tokens` テーブル
 
 形態素解析の結果を格納します。`doc_id` と `token_id` の複合主キーにより一意性が保たれます。
 
 | カラム名 | 型 | 制約 | 説明 |
 | --- | --- | --- | --- |
-| `doc_id` | `INTEGER` | `FK` | `documents.doc_id` への外部キー |
+| `doc_id` | `INTEGER` |  | 文書ID（分離運用時はFK制約なし） |
 | `token_id` | `INTEGER` |  | 文書内でのトークン通し番号（0始まり） |
 | `word` | `TEXT` |  | トークン（表層形または辞書形など） |
 | `pos` | `TEXT` |  | 品詞（大分類） |
 | `token_info` | `TEXT` |  | 詳細情報の JSON 文字列（読み、原形など） |
+
+> **Primary Key**: `(doc_id, token_id)`
+> **Index**: `doc_id`, `word`, `pos` にインデックスが作成されます。
+> **Note**: 通常運用（一元管理）時は `documents.doc_id` への外部キー制約 (FK) がつきますが、分離運用時はDBファイルを跨ぐため FK は設定されません。
+
+##### `status_tokenize` テーブル
+
+形態素解析の進捗とエラー状態を管理します。
+
+| カラム名 | 型 | 制約 | 説明 |
+| --- | --- | --- | --- |
+| `doc_id` | `INTEGER` | `PK` | 文書ID（分離運用時はFK制約なし） |
+| `tokenize_ok` | `INTEGER` | `DEFAULT 0` | 解析成功フラグ（0:未, 1:済） |
+| `error_message` | `TEXT` |  | エラー発生時のトレースバック情報 |
+| `updated_at` | `TEXT` |  | 最終更新日時 |
+
 
 > **Primary Key**: `(doc_id, token_id)`
 > **Index**: `doc_id`, `word`, `pos` にインデックスが作成されます。
@@ -454,61 +529,47 @@ for start_id in range(1, max_id + 1, chunk_size):
 
 ### 2. API リファレンス (CorpusDB クラス)
 
+### 2. API リファレンス (CorpusDB クラス)
+
 ユーザーが利用する主要なメソッドの一覧です。
 
-#### `__init__(self, db_path="corpus.db")`
-
+#### `__init__(self, db_path="corpus.db", master_db_path=None)`
 データベースに接続し、テーブルが存在しない場合は作成します。
 
-* **Parameters**
-* `db_path` (str): SQLite データベースファイルのパス。Google Drive 上のパスを推奨。
-
-
+- **Parameters**
+  - `db_path` (str): 作業用 DB（Work）のパス。`tokens`, `status_tokenize` を保存します。
+  - `master_db_path` (str, optional): データ管理用 DB（Master）のパス。指定した場合、`documents`, `text`, `status_fetch` はこちらを参照します。指定しない場合（一元管理）、すべてのテーブルが `db_path` に作成されます。
 
 #### `register_files(self, root_dir, exts=("*.txt",))`
-
 指定ディレクトリ以下のファイルを走査し、パス情報を `documents` テーブルに登録します。テキストの中身は読み込みません。
 
-* **Parameters**
-* `root_dir` (str | Path): 走査対象のルートディレクトリ。
-* `exts` (tuple | list): 対象とする拡張子のリスト（例: `["*.txt", "*.md"]`）。
-
-
+- **Note**: `master_db_path` 指定時は Master DB が更新されます。
 
 #### `register_content_stream(self, iterator, *, batch_size=10000, source_label="imported")`
-
 イテレータから `(original_id, text)` のタプルを順次読み込み、指定バッチサイズごとに DB へ登録します。すでにテキストを保持しているため、`fetch_ok=1` として登録されます。
 
-* **Parameters**
-* `iterator` (iterable): `(original_id, text)` を返すイテレータ（Cursor や Generator）。
-* `batch_size` (int): 一度にコミットする件数。
-* `source_label` (str): 内部管理用のパス生成に使われるプレフィックス。
+- **Note**:
+  - `master_db_path` 指定時は Master DB が更新されます。
+  - **再投入（本文更新）の挙動**: 同一 ID のデータが再投入された場合、本文 (`text`) が更新され、同時に解析ステータス (`tokenize_ok`) が `0` にリセットされます（再解析待ちになります）。
 
-
+#### `sync_status_from_master(self)`
+[Splitモード用] Master DB の情報を基に、Work DB の `status_tokenize` を初期化します。Work DB を新規作成した直後に実行してください。
 
 #### `process_queue(self, tokenize_fn=None, *, fetch_only=False)`
+未処理のファイルを順次読み込み、解析して保存します。ファイルアクセスを伴います。
 
-未処理（`tokenize_ok=0`）のファイルを順次読み込み、解析して保存します。ファイルアクセスを伴います。
-
-* **Parameters**
-* `tokenize_fn` (callable, optional): `fetch_only=False` の場合は必須。`DataFrame(columns=[doc_id, text])` を受け取り、`DataFrame(columns=[doc_id, token_id, word, pos, ...])` を返す関数。
-* `fetch_only` (bool): `True` の場合、テキスト読み込みと DB 保存だけをおこない、形態素解析はスキップする。
-
-
+- `fetch_only=True`: `status_fetch` (fetch_ok) を更新します。
+- `fetch_only=False`: `status_tokenize` (tokenize_ok) を更新します。
 
 #### `reset_tokens(self, doc_ids=None, *, vacuum=False, reset_only_fetched=True)`
-
 解析結果（`tokens`）を削除し、ステータス（`tokenize_ok`）を未完了（0）に戻します。
 
-* **Parameters**
-* `doc_ids` (list | None): リセット対象の ID リスト。`None` の場合は全件リセット。
-* `vacuum` (bool): `True` の場合、削除後に `VACUUM` コマンドを実行して DB ファイルサイズを最適化する。
-* `reset_only_fetched` (bool): `True` の場合、テキスト取得済み（`fetch_ok=1`）のデータのみステータスを戻す。全件リセット時は通常 `True` でよい。
-
-
+- **Parameters**
+  - `doc_ids` (list | None): リセット対象の ID リスト。`None` の場合は全件リセット。
+  - `vacuum` (bool): `True` の場合、削除後に `VACUUM` コマンドを実行して DB ファイルサイズを最適化する。
+  - `reset_only_fetched` (bool): `True` の場合、テキスト取得済み（`fetch_ok=1`）のデータのみステータスを戻す。全件リセット時は通常 `True` でよい。
 
 #### `reprocess_tokens(self, tokenize_fn, *, doc_ids=None, ...)`
-
 DB 内のテキスト（`fetch_ok=1`）を使用して再解析を行います。ファイルアクセスが発生しないため高速です。
 
 * **Parameters**
@@ -518,7 +579,6 @@ DB 内のテキスト（`fetch_ok=1`）を使用して再解析を行います�
 * `max_docs` (int): 1バッチあたりの最大文書数（既定 `500`）。
 * `progress_every_batches` (int): 進捗表示を行うバッチ間隔（既定 `10`）。
 * `fallback_to_single` (bool): バッチ処理でエラーが出た際、1件ずつの処理に切り替えて救済するかどうか（既定 `True`）。
-
 
 
 ---
