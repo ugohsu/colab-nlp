@@ -993,6 +993,289 @@ class CorpusDB:
             return f"{m}m{s:02d}s"
         return f"{s}s"
 
+    def export_filtered_tokens_db(
+        self,
+        dst_db_path: str,
+        transform_fn: Callable[[pd.DataFrame], pd.DataFrame],
+        *,
+        chunk_char_limit: int = 2_000_000,
+        doc_batch_limit: int = 5_000,
+        progress_every: int = 20,
+        vacuum: bool = False,
+    ) -> None:
+        """
+        既存の tokens に対して transform_fn（フィルタ/変換）をチャンク単位で適用し、
+        派生DB（dst_db_path）を構築する。
+
+        仕様（あなたの「仕様A」＋容量最適化）
+        -----------------------------------
+        - split モード（master_db_path が指定されている場合）:
+            * dst は「work DB と同型」で新規作成する（tokens / status_tokenize のみ）。
+            * documents / text / status_fetch は dst に入れない（容量対策）。
+            * master は引き続き参照する前提（dst は work だけ持つ）。
+        - 一元管理（master_db_path が None の場合）:
+            * dst は現DBの完全コピーとして作り、tokens だけを作り直す。
+
+        transform_fn の契約（固定スキーマ・token_id 維持）
+        --------------------------------------------------
+        - 入力: tokens の DataFrame（doc_id, token_id, word, pos, token_info を含む想定）
+        - 出力: 同じスキーマ（doc_id, token_id, word, pos, token_info）を維持した DataFrame
+                ※ 行を削る（フィルタ）用途を想定。列追加は非推奨（必要なら token_info に入れる）。
+        - token_id は「維持」する（振り直しはしない）。
+        """
+        if not callable(transform_fn):
+            raise TypeError("transform_fn は callable である必要があります。")
+
+        # ------------------------------------------------------------
+        # 0) dst DB を作る
+        #   - split: dst を work同型（tokens/status_tokenizeのみ）で新規作成
+        #   - single: dst を現DBの完全コピーとして作成（backup）
+        # ------------------------------------------------------------
+        dst_path = Path(dst_db_path)
+        if dst_path.exists():
+            dst_path.unlink()
+
+        if self.master_db_path:
+            # ---- split: dst は work-only DB として新規作成 ----
+            with sqlite3.connect(dst_db_path) as con_out:
+                con_out.execute("PRAGMA foreign_keys = ON;")
+
+                # tokens（work固定スキーマ・FKなし）
+                con_out.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS tokens (
+                        doc_id INTEGER,
+                        token_id INTEGER,
+                        word TEXT,
+                        pos TEXT,
+                        token_info TEXT,
+                        PRIMARY KEY (doc_id, token_id)
+                    );
+                    """
+                )
+
+                # status_tokenize（work固定）
+                con_out.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS status_tokenize (
+                        doc_id INTEGER PRIMARY KEY,
+                        tokenize_ok INTEGER DEFAULT 0,
+                        error_message TEXT,
+                        updated_at TEXT
+                    );
+                    """
+                )
+
+                # インデックス（work側の最低限）
+                con_out.execute("CREATE INDEX IF NOT EXISTS idx_tokens_doc_id ON tokens(doc_id);")
+                con_out.execute("CREATE INDEX IF NOT EXISTS idx_tokens_word ON tokens(word);")
+                con_out.execute("CREATE INDEX IF NOT EXISTS idx_tokens_pos ON tokens(pos);")
+                con_out.execute("CREATE INDEX IF NOT EXISTS idx_status_tokenize_ok ON status_tokenize(tokenize_ok);")
+
+                con_out.commit()
+
+            # dst の status_tokenize は、まず src(work) の status_tokenize を丸ごとコピーしておく
+            # （doc_id 行が無いと UPDATE が効かないため）
+            with sqlite3.connect(self.db_path) as con_src, sqlite3.connect(dst_db_path) as con_out:
+                df_st = pd.read_sql("SELECT doc_id, tokenize_ok, error_message, updated_at FROM status_tokenize", con_src)
+                if not df_st.empty:
+                    df_st.to_sql("status_tokenize", con_out, if_exists="append", index=False, method="multi", chunksize=5000)
+                con_out.commit()
+
+        else:
+            # ---- single: dst を現DBの完全コピーとして作成 ----
+            src_con = sqlite3.connect(self.db_path)
+            try:
+                dst_con = sqlite3.connect(dst_db_path)
+                try:
+                    src_con.backup(dst_con)
+                finally:
+                    dst_con.close()
+            finally:
+                src_con.close()
+
+        # ------------------------------------------------------------
+        # 1) dst の tokens を全消去し、status_tokenize を未処理に戻す
+        # ------------------------------------------------------------
+        with sqlite3.connect(dst_db_path) as con_out:
+            now = datetime.now().isoformat()
+
+            con_out.execute("DELETE FROM tokens")
+
+            # status_tokenize の行は残し、未処理に戻す
+            con_out.execute(
+                """
+                UPDATE status_tokenize
+                SET tokenize_ok = 0,
+                    updated_at = ?,
+                    error_message = NULL
+                """,
+                (now,),
+            )
+            con_out.commit()
+
+        # ------------------------------------------------------------
+        # 2) チャンク分割（text.char_count を使う）
+        #   - split: self.t_text は master.text
+        #   - single: self.t_text は text
+        # ------------------------------------------------------------
+        with self._connect() as con_in:
+            df_docs = pd.read_sql(
+                f"""
+                SELECT doc_id, char_count
+                FROM {self.t_text}
+                ORDER BY doc_id
+                """,
+                con_in,
+            )
+
+        if df_docs.empty:
+            return
+
+        chunks: list[list[int]] = []
+        current_ids: list[int] = []
+        current_chars = 0
+
+        for row in df_docs.itertuples(index=False):
+            doc_id = int(row.doc_id)
+            cc = int(row.char_count) if row.char_count is not None else 0
+
+            # doc_id は必ず丸ごと同一チャンクに入れる（途中分割しない）
+            if current_ids and (current_chars + cc > chunk_char_limit or len(current_ids) >= doc_batch_limit):
+                chunks.append(current_ids)
+                current_ids = []
+                current_chars = 0
+
+            current_ids.append(doc_id)
+            current_chars += cc
+
+        if current_ids:
+            chunks.append(current_ids)
+
+        # ------------------------------------------------------------
+        # 3) チャンクごとに tokens を読む → transform_fn 適用 → dst に保存
+        #   ※ tokens の読み取り元は「現在の work DB（self.db_path）」の main.tokens
+        # ------------------------------------------------------------
+        total_chunks = len(chunks)
+
+        for ci, doc_ids in enumerate(chunks, start=1):
+            t0 = time.time()
+            try:
+                ph = ",".join(["?"] * len(doc_ids))
+
+                # --- 入力 tokens を読む（常に work DB の tokens） ---
+                with sqlite3.connect(self.db_path) as con_tokens:
+                    df_in = pd.read_sql(
+                        f"""
+                        SELECT doc_id, token_id, word, pos, token_info
+                        FROM tokens
+                        WHERE doc_id IN ({ph})
+                        ORDER BY doc_id, token_id
+                        """,
+                        con_tokens,
+                        params=doc_ids,
+                    )
+
+                # --- transform 適用 ---
+                df_out = transform_fn(df_in)
+                if df_out is None:
+                    df_out = pd.DataFrame(columns=df_in.columns)
+
+                if not isinstance(df_out, pd.DataFrame):
+                    raise TypeError("transform_fn は pandas.DataFrame（または None）を返してください。")
+
+                # ----------------------------------------------------
+                # 品質保証（固定スキーマ・token_id維持）
+                # ----------------------------------------------------
+                required_cols = ["doc_id", "token_id", "word"]
+                for c in required_cols:
+                    if c not in df_out.columns:
+                        raise ValueError(f"transform_fn の出力に必須列 {c} がありません。")
+
+                # 余計な列は落として固定スキーマに寄せる
+                valid_cols = ["doc_id", "token_id", "word", "pos", "token_info"]
+                df_out = df_out[[c for c in valid_cols if c in df_out.columns]].copy()
+
+                # チャンク外 doc_id の混入防止
+                bad_ids = df_out.loc[~df_out["doc_id"].isin(doc_ids), "doc_id"].unique()
+                if len(bad_ids) > 0:
+                    raise ValueError(f"transform_fn 出力にチャンク外 doc_id が混入: {bad_ids[:10]}")
+
+                # 必須列NAチェック
+                if df_out[required_cols].isna().any().any():
+                    raise ValueError("transform_fn 出力の必須列（doc_id/token_id/word）に NA があります。")
+
+                # doc_id/token_id は整数化（token_idは維持前提）
+                df_out["doc_id"] = df_out["doc_id"].astype(int)
+                df_out["token_id"] = df_out["token_id"].astype(int)
+
+                # (doc_id, token_id) 重複禁止
+                if df_out.duplicated(subset=["doc_id", "token_id"]).any():
+                    raise ValueError("transform_fn 出力で (doc_id, token_id) が重複しています。")
+
+                # token_info の正規化（dict/list → JSON文字列）
+                if "token_info" in df_out.columns:
+                    df_out["token_info"] = df_out["token_info"].apply(
+                        lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, (dict, list)) else x
+                    )
+
+                # --- dst へ保存 ---
+                with sqlite3.connect(dst_db_path) as con_out:
+                    if not df_out.empty:
+                        df_out.to_sql(
+                            "tokens",
+                            con_out,
+                            if_exists="append",
+                            index=False,
+                            method="multi",
+                            chunksize=5000,
+                        )
+
+                    # チャンク内 doc_id を「完了」にする
+                    now = datetime.now().isoformat()
+                    ph2 = ",".join(["?"] * len(doc_ids))
+                    con_out.execute(
+                        f"""
+                        UPDATE status_tokenize
+                        SET tokenize_ok = 1,
+                            updated_at = ?,
+                            error_message = NULL
+                        WHERE doc_id IN ({ph2})
+                        """,
+                        [now, *doc_ids],
+                    )
+                    con_out.commit()
+
+            except Exception as e:
+                # チャンク単位で失敗しても、処理全体は止めずにエラーを記録する
+                msg = "".join(traceback.format_exception(None, e, e.__traceback__))
+                with sqlite3.connect(dst_db_path) as con_out:
+                    now = datetime.now().isoformat()
+                    ph2 = ",".join(["?"] * len(doc_ids))
+                    con_out.execute(
+                        f"""
+                        UPDATE status_tokenize
+                        SET tokenize_ok = 0,
+                            updated_at = ?,
+                            error_message = ?
+                        WHERE doc_id IN ({ph2})
+                        """,
+                        [now, msg, *doc_ids],
+                    )
+                    con_out.commit()
+
+            finally:
+                if progress_every and (ci % progress_every == 0 or ci == total_chunks):
+                    dt = time.time() - t0
+                    print(f"[export_filtered_tokens_db] chunk {ci}/{total_chunks} 完了 ({dt:.2f}s)")
+
+        # ------------------------------------------------------------
+        # 4) 必要なら VACUUM（dst のみ）
+        # ------------------------------------------------------------
+        if vacuum:
+            with sqlite3.connect(dst_db_path) as con_out:
+                con_out.execute("VACUUM")
+
 # ----------------------------------------------------------------------
 # クラスの外に定義
 # ----------------------------------------------------------------------
