@@ -271,12 +271,13 @@ class CorpusDB:
         with self._connect() as con:
             # 【修正】imported:// などの仮想パスを対象外にするフィルタを追加
             #  process_queue はファイル読み込みを伴うため、実ファイル以外は処理してはならない
+            # 【A案対応】file:// も含め、スキーム(://)を持つパスは一律除外する（シンプル化）
             query = f"""
                 SELECT s.doc_id 
                 FROM status s
                 JOIN documents d ON s.doc_id = d.doc_id
                 WHERE {target_condition}
-                  AND (d.abs_path NOT LIKE '%://%' OR d.abs_path LIKE 'file://%')
+                  AND d.abs_path NOT LIKE '%://%'
                 ORDER BY s.doc_id
             """
             target_ids = pd.read_sql(query, con)["doc_id"].tolist()
@@ -674,6 +675,10 @@ class CorpusDB:
         if not df_tokens.empty:
             if "doc_id" not in df_tokens.columns:
                 raise ValueError("batch tokenize requires doc_id column.")
+
+            # 【B案対応】doc_id の NA チェック（デバッグ性向上）
+            if df_tokens["doc_id"].isna().any():
+                raise ValueError("tokenize_fn returned NaN in 'doc_id'. Please check tokenizer output.")
 
             # 【追加修正】word カラム必須チェック (process_queue と同等)
             if "word" not in df_tokens.columns:
