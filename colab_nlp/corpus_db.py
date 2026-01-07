@@ -155,6 +155,7 @@ class CorpusDB:
     ):
         """
         イテレータからデータを順次読み込み、指定バッチサイズごとにDBへ登録する（省メモリ版）。
+        ※ 重複データ（同じ abs_path）があっても、正しく既存の doc_id を再利用して上書きします。
         
         Parameters
         ----------
@@ -169,20 +170,12 @@ class CorpusDB:
         now = datetime.now().isoformat()
         
         # バッファ初期化
-        data_docs = []
-        data_text = []
-        data_stat = []
+        batch_buffer = []
         
         print(f"Starting stream import (batch_size={batch_size})...")
         
         # コネクションは外側で1つ維持し、バッチごとに commit する
         with self._connect() as con:
-            # 開始時点の ID を取得
-            cur = con.execute("SELECT MAX(doc_id) FROM documents")
-            res = cur.fetchone()
-            # MAX(doc_id) が None の場合は 0 スタート
-            current_doc_id = (res[0] if res and res[0] is not None else 0)
-            
             total_processed = 0
             
             for original_id, text_body in iterator:
@@ -190,48 +183,71 @@ class CorpusDB:
                 if not text_body or not isinstance(text_body, str):
                     continue
                 
-                # ID インクリメント
-                current_doc_id += 1
-                
-                # abs_path (ユニーク制約対策)
-                abs_path = f"{source_label}://{original_id}"
-                
-                # データをバッファに追加
-                data_docs.append((current_doc_id, abs_path, str(original_id), now))
-                data_text.append((current_doc_id, len(text_body), text_body))
-                data_stat.append((current_doc_id, now, 1, 0, now)) # fetch_ok=1, tokenize_ok=0
+                # バッファに追加 (ID解決は flush_batch で行う)
+                batch_buffer.append((original_id, text_body))
                 
                 # バッチサイズに達したら書き込み
-                if len(data_docs) >= batch_size:
-                    self._flush_batch(con, data_docs, data_text, data_stat)
-                    total_processed += len(data_docs)
+                if len(batch_buffer) >= batch_size:
+                    self._flush_batch(con, batch_buffer, source_label, now)
+                    total_processed += len(batch_buffer)
                     print(f"Imported {total_processed} records...")
                     
-                    # バッファクリア (ここでメモリ解放)
-                    data_docs.clear()
-                    data_text.clear()
-                    data_stat.clear()
+                    # バッファクリア
+                    batch_buffer.clear()
 
             # 残りの端数を書き込み
-            if data_docs:
-                self._flush_batch(con, data_docs, data_text, data_stat)
-                total_processed += len(data_docs)
+            if batch_buffer:
+                self._flush_batch(con, batch_buffer, source_label, now)
+                total_processed += len(batch_buffer)
                 
             print(f"Stream import finished. Total: {total_processed} records.")
 
-    def _flush_batch(self, con, docs, texts, stats):
-        """内部利用: バッチ書き込み実行"""
-        con.executemany(
-            "INSERT OR IGNORE INTO documents (doc_id, abs_path, rel_path, created_at) VALUES (?, ?, ?, ?)",
-            docs
-        )
+    def _flush_batch(self, con, batch, source_label, now):
+        """内部利用: バッチ書き込み実行（ID整合性対策済み）"""
+        data_text = []
+        data_status = []
+        
+        # バッチ内の各アイテムについて、正しい doc_id を解決しながらデータを準備
+        for original_id, text_body in batch:
+            abs_path = f"{source_label}://{original_id}"
+            
+            # 1. documents テーブルへ登録 (IDは自動採番におまかせ)
+            #    すでに存在する場合は IGNORE で何もしない (既存IDが維持される)
+            con.execute(
+                "INSERT OR IGNORE INTO documents (abs_path, rel_path, created_at) VALUES (?, ?, ?)",
+                (abs_path, str(original_id), now)
+            )
+            
+            # 2. 正しい doc_id を取得 (これが最も確実)
+            #    abs_path は UNIQUE なので必ず1つ特定できる
+            cur = con.execute("SELECT doc_id FROM documents WHERE abs_path = ?", (abs_path,))
+            row = cur.fetchone()
+            
+            if not row:
+                continue
+                
+            doc_id = row[0]
+            
+            # 3. 取得した doc_id を使ってコンテンツデータを準備
+            data_text.append((
+                doc_id,
+                len(text_body),
+                text_body
+            ))
+            data_status.append((
+                doc_id,
+                now, 1, 0, now  # fetch_ok=1, tokenize_ok=0
+            ))
+
+        # 4. コンテンツの一括書き込み
+        #    text/status は上書き(REPLACE)して最新状態にする
         con.executemany(
             "INSERT OR REPLACE INTO text (doc_id, char_count, text) VALUES (?, ?, ?)",
-            texts
+            data_text
         )
         con.executemany(
             "INSERT OR REPLACE INTO status (doc_id, fetched_at, fetch_ok, tokenize_ok, updated_at) VALUES (?, ?, ?, ?, ?)",
-            stats
+            data_status
         )
         con.commit()
 
