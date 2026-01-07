@@ -345,6 +345,50 @@ db.reprocess_tokens(my_tokenizer)
 
 ---
 
+## Advanced: 解析結果のフィルタリングとエクスポート
+
+「名詞だけを抽出したい」「特定の単語を含む行は除外したい」といった条件で解析結果をフィルタリングし、**新しいデータベースとしてエクスポート**することができます。
+
+これにより、ファイルサイズを削減したり、配布用に必要なデータだけを切り出したりすることが可能です。
+
+### 特徴
+
+* **Master/Work 分離運用の場合**:
+    * エクスポートされる DB は **Work DB の構造（tokens, status_tokenize のみ）** を持ちます。
+    * 元のテキスト（Master DB）を含まないため、非常に軽量な「解析結果のみの DB」を作成できます。
+* **一元管理運用の場合**:
+    * 元の DB をコピーした上で、tokens テーブルだけをフィルタリング結果で置き換えます（メタデータ等は保持されます）。
+
+### 実行例
+
+以下は、「名詞のみ」を残した軽量なデータベース `noun_only.db` を作成する例です。
+
+```python
+# フィルタ関数の定義
+# 入力: tokens DataFrame (doc_id, token_id, word, pos, token_info)
+# 出力: フィルタ後の DataFrame (同上)
+def noun_filter(df):
+    # "pos" が "名詞" の行だけ抽出
+    return filter_tokens_df(df, pos_keep={"名詞"})
+
+# エクスポート実行
+db.export_filtered_tokens_db(
+    dst_db_path="noun_only.db",  # 出力先パス（新規作成されます）
+    transform_fn=noun_filter,    # 定義した関数
+    vacuum=True                  # 完了後にファイルサイズを最適化する
+)
+
+```
+
+作成された `noun_only.db` は、通常の `CorpusDB` として（Master を指定して）読み込むことができます。
+
+```python
+# 作成した軽量DBを Work として読み込む
+db_noun = CorpusDB(db_path="noun_only.db", master_db_path=master_path)
+
+```
+
+---
 
 ## 構築したデータの利用方法
 
@@ -572,13 +616,23 @@ for start_id in range(1, max_id + 1, chunk_size):
 #### `reprocess_tokens(self, tokenize_fn, *, doc_ids=None, ...)`
 DB 内のテキスト（`fetch_ok=1`）を使用して再解析を行います。ファイルアクセスが発生しないため高速です。
 
-* **Parameters**
-* `tokenize_fn` (callable): 再解析に使用するトークナイズ関数。
-* `doc_ids` (list | None): 対象 ID のリスト。`None` の場合は「テキスト取得済みかつ未解析（`tokenize_ok=0`）」の全件を対象とする。
-* `max_chars` (int): 1バッチあたりの最大文字数（メモリ保護用。既定 `200,000`）。
-* `max_docs` (int): 1バッチあたりの最大文書数（既定 `500`）。
-* `progress_every_batches` (int): 進捗表示を行うバッチ間隔（既定 `10`）。
-* `fallback_to_single` (bool): バッチ処理でエラーが出た際、1件ずつの処理に切り替えて救済するかどうか（既定 `True`）。
+- **Parameters**
+    - `tokenize_fn` (callable): 再解析に使用するトークナイズ関数。
+    - `doc_ids` (list | None): 対象 ID のリスト。`None` の場合は「テキスト取得済みかつ未解析（`tokenize_ok=0`）」の全件を対象とする。
+    - `max_chars` (int): 1バッチあたりの最大文字数（メモリ保護用。既定 `200,000`）。
+    - `max_docs` (int): 1バッチあたりの最大文書数（既定 `500`）。
+    - `progress_every_batches` (int): 進捗表示を行うバッチ間隔（既定 `10`）。
+    - `fallback_to_single` (bool): バッチ処理でエラーが出た際、1件ずつの処理に切り替えて救済するかどうか（既定 `True`）。
+    
+#### `export_filtered_tokens_db(self, dst_db_path, transform_fn, *, vacuum=False, ...)`
+現在の `tokens` テーブルに対してフィルタや変換を適用し、結果を新しいデータベースに保存します。
+
+- **Parameters**
+  - `dst_db_path` (str): 出力先の DB パス。既存ファイルは削除・上書きされます。
+  - `transform_fn` (callable): `DataFrame` を受け取り、フィルタ後の `DataFrame` を返す関数。
+      - **入力/出力**: `doc_id`, `token_id`, `word`, `pos`, `token_info` 列を持つ DataFrame。
+      - **制約**: `token_id` は変更せず、そのまま維持してください（語順保証のため）。
+  - `vacuum` (bool): `True` の場合、作成後に `VACUUM` を実行してファイルサイズを最小化します。
 
 
 ---
@@ -602,32 +656,32 @@ corpus_reader(
 
 #### 引数
 
-* **`db_path`** (必須)
-* 型: `str`
-* SQLite データベースファイルのパス（例: `"corpus.db"`）。
-* **`table_name`**
-* 型: `str`
-* 既定: `"tokens"`
-* 読み込み対象のテーブル名。
-* **`id_col`**
-* 型: `str`
-* 既定: `"doc_id"`
-* 文書IDのカラム名。データの読み込み範囲を制御するために使用されます。
-* **`word_col`**
-* 型: `str`
-* 既定: `"word"`
-* 単語のカラム名。
-* **`token_id_col`**
-* 型: `str`
-* 既定: `"token_id"`
-* 文書内の語順を保証するためのカラム名。N-gram 解析などでは必須です。
-* **`chunk_size`**
-* 型: `int`
-* 既定: `1000`
-* 一度に DB から読み込む文書IDの範囲（幅）。
-* 大きくすると DB アクセス回数は減りますが、メモリ使用量が増えます。
+- **`db_path`** (必須)
+    - 型: `str`
+    - SQLite データベースファイルのパス（例: `"corpus.db"`）。
+- **`table_name`**
+    - 型: `str`
+    - 既定: `"tokens"`
+    - 読み込み対象のテーブル名。
+- **`id_col`**
+    - 型: `str`
+    - 既定: `"doc_id"`
+    - 文書IDのカラム名。データの読み込み範囲を制御するために使用されます。
+- **`word_col`**
+    - 型: `str`
+    - 既定: `"word"`
+    - 単語のカラム名。
+- **`token_id_col`**
+    - 型: `str`
+    - 既定: `"token_id"`
+    - 文書内の語順を保証するためのカラム名。N-gram 解析などでは必須です。
+- **`chunk_size`**
+    - 型: `int`
+    - 既定: `1000`
+    - 一度に DB から読み込む文書IDの範囲（幅）。
+    - 大きくすると DB アクセス回数は減りますが、メモリ使用量が増えます。
 
 #### 戻り値 (Yields)
 
-* **`list[str]`**
-* 1文書に含まれるトークンのリストを、文書ごとに順番に返します（yield）。
+- **`list[str]`**
+    - 1文書に含まれるトークンのリストを、文書ごとに順番に返します（yield）。
