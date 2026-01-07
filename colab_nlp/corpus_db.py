@@ -7,7 +7,7 @@ import json
 
 # ===== 追加（新メソッド用。既存 import は変更しない） =====
 import time
-from typing import Callable, Optional, Sequence, Union, Generator
+from typing import Callable, Optional, Sequence, Union, Generator, Iterable, Tuple
 # ===========================================================
 
 class CorpusDB:
@@ -146,6 +146,95 @@ class CorpusDB:
             
         print(f"Registered {added_count} new files. (Total found: {len(paths)})")
 
+    def register_content_stream(
+        self,
+        iterator: Iterable[Tuple[str, str]],
+        *,
+        batch_size: int = 10000,
+        source_label: str = "imported"
+    ):
+        """
+        イテレータからデータを順次読み込み、指定バッチサイズごとにDBへ登録する（省メモリ版）。
+        
+        Parameters
+        ----------
+        iterator : iterable
+            (original_id, text_body) のタプルを順次返すイテレータ。
+            例: sqlite3 の cursor, CSV reader, またはジェネレータ関数。
+        batch_size : int
+            一度にコミットする件数。メモリ使用量と速度のバランスで調整。
+        source_label : str
+            abs_path 生成用のプレフィックス (imported://<original_id>)。
+        """
+        now = datetime.now().isoformat()
+        
+        # バッファ初期化
+        data_docs = []
+        data_text = []
+        data_stat = []
+        
+        print(f"Starting stream import (batch_size={batch_size})...")
+        
+        # コネクションは外側で1つ維持し、バッチごとに commit する
+        with self._connect() as con:
+            # 開始時点の ID を取得
+            cur = con.execute("SELECT MAX(doc_id) FROM documents")
+            res = cur.fetchone()
+            # MAX(doc_id) が None の場合は 0 スタート
+            current_doc_id = (res[0] if res and res[0] is not None else 0)
+            
+            total_processed = 0
+            
+            for original_id, text_body in iterator:
+                # バリデーション
+                if not text_body or not isinstance(text_body, str):
+                    continue
+                
+                # ID インクリメント
+                current_doc_id += 1
+                
+                # abs_path (ユニーク制約対策)
+                abs_path = f"{source_label}://{original_id}"
+                
+                # データをバッファに追加
+                data_docs.append((current_doc_id, abs_path, str(original_id), now))
+                data_text.append((current_doc_id, len(text_body), text_body))
+                data_stat.append((current_doc_id, now, 1, 0, now)) # fetch_ok=1, tokenize_ok=0
+                
+                # バッチサイズに達したら書き込み
+                if len(data_docs) >= batch_size:
+                    self._flush_batch(con, data_docs, data_text, data_stat)
+                    total_processed += len(data_docs)
+                    print(f"Imported {total_processed} records...")
+                    
+                    # バッファクリア (ここでメモリ解放)
+                    data_docs.clear()
+                    data_text.clear()
+                    data_stat.clear()
+
+            # 残りの端数を書き込み
+            if data_docs:
+                self._flush_batch(con, data_docs, data_text, data_stat)
+                total_processed += len(data_docs)
+                
+            print(f"Stream import finished. Total: {total_processed} records.")
+
+    def _flush_batch(self, con, docs, texts, stats):
+        """内部利用: バッチ書き込み実行"""
+        con.executemany(
+            "INSERT OR IGNORE INTO documents (doc_id, abs_path, rel_path, created_at) VALUES (?, ?, ?, ?)",
+            docs
+        )
+        con.executemany(
+            "INSERT OR REPLACE INTO text (doc_id, char_count, text) VALUES (?, ?, ?)",
+            texts
+        )
+        con.executemany(
+            "INSERT OR REPLACE INTO status (doc_id, fetched_at, fetch_ok, tokenize_ok, updated_at) VALUES (?, ?, ?, ?, ?)",
+            stats
+        )
+        con.commit()
+
     def process_queue(self, tokenize_fn=None, *, fetch_only: bool = False):
         """
         未処理のファイルを順次処理するメインループ。
@@ -202,6 +291,19 @@ class CorpusDB:
             
         path_str = row[0]
         
+        # ============================================================
+        # 【追加】誤って process_queue を呼んだ場合のガード (Safety Hook)
+        # ============================================================
+        # インポート機能で登録されたパス (例: imported://...) は実ファイルではないため、
+        # process_queue (ファイル読み込み) ではなく reprocess_tokens (DB内テキスト利用) を使う必要があります。
+        if "://" in path_str and not path_str.startswith("file://"):
+            raise ValueError(
+                f"Virtual path detected: '{path_str}'\n"
+                "This document was imported directly from DB/DataFrame and has no physical file.\n"
+                "Please use `db.reprocess_tokens()` instead of `db.process_queue()`."
+            )
+        # ============================================================
+
         # 2. ファイル読み込み
         try:
             text = Path(path_str).read_text(encoding="utf-8", errors="strict")
