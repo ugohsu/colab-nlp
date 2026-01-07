@@ -434,10 +434,8 @@ class CorpusDB:
                 query = f"""
                     SELECT st.doc_id 
                     FROM {self.t_status_tokenize} st
-                    JOIN {self.t_status_fetch} sf ON st.doc_id = sf.doc_id
                     JOIN {self.t_docs} d ON st.doc_id = d.doc_id
-                    WHERE sf.fetch_ok = 1
-                      AND {target_condition}
+                    WHERE {target_condition}
                       AND d.abs_path NOT LIKE '%://%'
                     ORDER BY st.doc_id
                 """
