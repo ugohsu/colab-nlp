@@ -121,27 +121,21 @@ class CorpusDB:
                 abs_p = str(p.resolve())
                 rel_p = str(p.relative_to(root))
                 
-                # 重複チェック（abs_path が UNIQUE）
-                exists = con.execute(
-                    "SELECT 1 FROM documents WHERE abs_path = ?", (abs_p,)
-                ).fetchone()
+                # 【修正】INSERT OR IGNORE で一発登録（高速化・簡素化）
+                cur = con.execute(
+                    "INSERT OR IGNORE INTO documents (abs_path, rel_path, created_at) VALUES (?, ?, ?)",
+                    (abs_p, rel_p, now)
+                )
                 
-                if not exists:
-                    try:
-                        cur = con.execute(
-                            "INSERT INTO documents (abs_path, rel_path, created_at) VALUES (?, ?, ?)",
-                            (abs_p, rel_p, now)
-                        )
-                        doc_id = cur.lastrowid
-                        
-                        # status テーブルにも初期レコードを作成
-                        con.execute(
-                            "INSERT INTO status (doc_id, fetch_ok, tokenize_ok) VALUES (?, 0, 0)",
-                            (doc_id,)
-                        )
-                        added_count += 1
-                    except sqlite3.IntegrityError:
-                        continue
+                # 新規登録された場合のみ (rowcount > 0) status を初期化
+                if cur.rowcount > 0:
+                    doc_id = cur.lastrowid
+                    con.execute(
+                        "INSERT INTO status (doc_id, fetch_ok, tokenize_ok) VALUES (?, 0, 0)",
+                        (doc_id,)
+                    )
+                    added_count += 1
+            
             con.commit()
             
         print(f"Registered {added_count} new files. (Total found: {len(paths)})")
@@ -180,7 +174,8 @@ class CorpusDB:
             
             for original_id, text_body in iterator:
                 # バリデーション
-                if not text_body or not isinstance(text_body, str):
+                # 【修正】空文字 ("") も許容し、None だけ弾くように変更
+                if text_body is None or not isinstance(text_body, str):
                     continue
                 
                 # バッファに追加 (ID解決は flush_batch で行う)
@@ -270,13 +265,21 @@ class CorpusDB:
         # 未処理の doc_id を取得
         # fetch_only=True なら「未取得(fetch_ok=0)」を対象にする
         # fetch_only=False なら「未解析(tokenize_ok=0)」を対象にする（取得済み未解析も含む）
-        target_condition = "fetch_ok = 0" if fetch_only else "tokenize_ok = 0"
+        # 【修正】JOIN 用にエイリアス s を付与
+        target_condition = "s.fetch_ok = 0" if fetch_only else "s.tokenize_ok = 0"
 
         with self._connect() as con:
-            target_ids = pd.read_sql(
-                f"SELECT doc_id FROM status WHERE {target_condition} ORDER BY doc_id", 
-                con
-            )["doc_id"].tolist()
+            # 【修正】imported:// などの仮想パスを対象外にするフィルタを追加
+            #  process_queue はファイル読み込みを伴うため、実ファイル以外は処理してはならない
+            query = f"""
+                SELECT s.doc_id 
+                FROM status s
+                JOIN documents d ON s.doc_id = d.doc_id
+                WHERE {target_condition}
+                  AND (d.abs_path NOT LIKE '%://%' OR d.abs_path LIKE 'file://%')
+                ORDER BY s.doc_id
+            """
+            target_ids = pd.read_sql(query, con)["doc_id"].tolist()
 
         total = len(target_ids)
         print(f"Processing {total} documents (fetch_only={fetch_only})...")
@@ -312,6 +315,7 @@ class CorpusDB:
         # ============================================================
         # インポート機能で登録されたパス (例: imported://...) は実ファイルではないため、
         # process_queue (ファイル読み込み) ではなく reprocess_tokens (DB内テキスト利用) を使う必要があります。
+        # ※ SQL側で除外しているため通常ここには来ないが、個別に呼んだ場合などの安全策として残す
         if "://" in path_str and not path_str.startswith("file://"):
             raise ValueError(
                 f"Virtual path detected: '{path_str}'\n"
