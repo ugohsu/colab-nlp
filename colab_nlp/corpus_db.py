@@ -183,8 +183,9 @@ class CorpusDB:
                 
                 # バッチサイズに達したら書き込み
                 if len(batch_buffer) >= batch_size:
-                    self._flush_batch(con, batch_buffer, source_label, now)
-                    total_processed += len(batch_buffer)
+                    # 【修正】実際に処理された件数を加算
+                    added = self._flush_batch(con, batch_buffer, source_label, now)
+                    total_processed += added
                     print(f"Imported {total_processed} records...")
                     
                     # バッファクリア
@@ -192,8 +193,8 @@ class CorpusDB:
 
             # 残りの端数を書き込み
             if batch_buffer:
-                self._flush_batch(con, batch_buffer, source_label, now)
-                total_processed += len(batch_buffer)
+                added = self._flush_batch(con, batch_buffer, source_label, now)
+                total_processed += added
                 
             print(f"Stream import finished. Total: {total_processed} records.")
 
@@ -222,6 +223,13 @@ class CorpusDB:
                 continue
                 
             doc_id = row[0]
+
+            # 【追加修正】status 行が確実に存在するように初期化 (堅牢性向上)
+            # documents があって status がない状態を防ぐ
+            con.execute(
+                "INSERT OR IGNORE INTO status (doc_id, fetch_ok, tokenize_ok) VALUES (?, 0, 0)",
+                (doc_id,)
+            )
             
             # 3. 取得した doc_id を使ってコンテンツデータを準備
             data_text.append((
@@ -245,6 +253,9 @@ class CorpusDB:
             data_status
         )
         con.commit()
+        
+        # 【修正】実際に処理した件数を返す
+        return len(data_text)
 
     def process_queue(self, tokenize_fn=None, *, fetch_only: bool = False):
         """
