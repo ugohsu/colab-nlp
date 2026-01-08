@@ -733,10 +733,9 @@ class CorpusDB:
 
         # --- 2) VACUUM (optional) ---
         if vacuum:
-            # VACUUM はトランザクション外で実行する必要がある
-            with self._connect() as con:
-                con.execute("VACUUM")
-                con.commit()
+            # VACUUM は autocommit モードの専用接続で実行
+            with sqlite3.connect(self.db_path, isolation_level=None) as con_vac:
+                con_vac.execute("VACUUM")
 
         print("Reset complete. Ready to reprocess.")
 
@@ -1272,8 +1271,9 @@ class CorpusDB:
         # ------------------------------------------------------------
         # 4) 必要なら VACUUM（dst のみ）
         # ------------------------------------------------------------
+        # VACUUM は autocommit モードで実行
         if vacuum:
-            with sqlite3.connect(dst_db_path) as con_out:
+            with sqlite3.connect(dst_db_path, isolation_level=None) as con_out:
                 con_out.execute("VACUUM")
 
 # ----------------------------------------------------------------------

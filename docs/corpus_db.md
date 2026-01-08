@@ -54,7 +54,7 @@ db.register_files(root_dir, exts=["*.txt"])
 
 ### 4. トークナイザ関数の定義
 
-CorpusDB は処理の内部で「DataFrame を受け取り、形態素解析済みの DataFrame を返す関数」を必要とします。 `tokenize_df` の設定（エンジンや辞書、フィルタ設定など）を固定したラッパー関数を定義します。`tokenize_df` の詳細 (engin にあわせてインポートしなければならないライブラリなど) は [`tokenization.md`](./tokenization.md) を参照してください。
+CorpusDB は処理の内部で「DataFrame を受け取り、形態素解析済みの DataFrame を返す関数」を必要とします。 `tokenize_df` の設定（エンジンや辞書、フィルタ設定など）を固定したラッパー関数を定義します。`tokenize_df` の詳細 (engine にあわせてインポートしなければならないライブラリなど) は [`tokenization.md`](./tokenization.md) を参照してください。
 
 ```python
 # engine にあわせた追加のライブラリのインポートが必要。ここでは、大規模データという要件にあわせて sudachi を採用する
