@@ -477,7 +477,7 @@ class CorpusDB:
         # インポート機能で登録されたパス (例: imported://...) は実ファイルではないため、
         # process_queue (ファイル読み込み) ではなく reprocess_tokens (DB内テキスト利用) を使う必要があります。
         # ※ SQL側で除外しているため通常ここには来ないが、個別に呼んだ場合などの安全策として残す
-        if "://" in path_str and not path_str.startswith("file://"):
+        if "://" in path_str:
             raise ValueError(
                 f"Virtual path detected: '{path_str}'\n"
                 "This document was imported directly from DB/DataFrame and has no physical file.\n"
