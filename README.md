@@ -89,6 +89,8 @@ fatal: destination path 'colab-common' already exists
 | **BoW / 可視化** | WordCloud による可視化 | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 | **BoW** | N-gram（Nグラム）の集計と大規模データ対応 | [`docs/bow/ngram.md`](./docs/bow/ngram.md) |
 | **BoW / 可視化** | 共起ネットワーク分析による可視化 | [`docs/bow/network_graph.md`](./docs/bow/network_graph.md) |
+| **Modeling** | モデリング・ベクトル化（総論） | [`docs/modeling/README.md`](./docs/modeling/README.md) |
+| **Modeling** | Word2Vec による単語の分散表現 | [`docs/modeling/word2vec.md`](./docs/modeling/word2vec.md) |
 
 ---
 
@@ -148,6 +150,19 @@ fatal: destination path 'colab-common' already exists
         - [`docs/bow/ngram.md`](./docs/bow/ngram.md)
     - 共起ネットワーク
         - [`docs/bow/network_graph.md`](./docs/bow/network_graph.md)
+
+---
+
+### 4. モデリング（ベクトル化）
+
+- 内容
+    - テキストデータを分散表現に変換し、機械学習モデル（Word2Vec, Doc2Vec, LDAなど）を適用します。
+    - 単語の意味計算、類似文書検索、トピック分類などが可能になります。
+- 参考資料
+    - モデリング総論
+        - [`docs/modeling/README.md`](./docs/modeling/README.md)
+    - Word2Vec
+        - [`docs/modeling/word2vec.md`](./docs/modeling/word2vec.md)
 
 ---
 
