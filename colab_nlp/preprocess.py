@@ -339,6 +339,8 @@ def tokenize_text_sudachi(
                 "surface": m.surface(),
                 "dictionary_form": m.dictionary_form(),
                 "normalized_form": m.normalized_form(),
+                "reading_form": m.reading_form(),       # 読み
+                "pos_detail": list(m.part_of_speech())  # 品詞情報の全タプルをリスト化
             }
 
         records.append((word, pos, token_info))
