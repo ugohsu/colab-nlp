@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 import sqlite3
 import pandas as pd
 import traceback
 import json
 import time
-from __future__ import annotations
 from pathlib import Path
 from datetime import datetime
 from typing import Iterator, Literal, Union, Tuple
