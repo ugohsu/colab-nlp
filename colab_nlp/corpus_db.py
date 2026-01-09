@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime
 import traceback
 import json
+from typing import Iterator
 
 # ===== 追加（新メソッド用。既存 import は変更しない） =====
 import time
@@ -1277,23 +1278,85 @@ class CorpusDB:
                 con_out.execute("VACUUM")
 
 # ----------------------------------------------------------------------
-# クラスの外に定義
+# CorpusReader クラス
 # ----------------------------------------------------------------------
 
-def corpus_reader(
-    db_path: str,
-    *,
-    table_name: str = "tokens",
-    id_col: str = "doc_id",
-    word_col: str = "word",
-    token_id_col: str = "token_id",  # ★追加: 順序保証用
-    chunk_size: int = 1000
-) -> Generator[list[str], None, None]:
+class CorpusReader:
     """
-    指定されたSQLiteデータベースから文書ごとにトークン列を読み込むジェネレータ。
-    メモリを節約するために、chunk_size 単位でデータを取得し、1文書ずつ yield する。
+    SQLiteデータベースから文書をストリーミング読み込みするための Iterable クラス。
+    Gensim (Word2Vec) のような複数回イテレーションが必要なライブラリにネイティブ対応します。
+    """
+    def __init__(
+        self,
+        db_path: str,
+        *,
+        table_name: str = "tokens",
+        id_col: str = "doc_id",
+        word_col: str = "word",
+        token_id_col: str = "token_id",
+        chunk_size: int = 1000
+    ):
+        self.db_path = db_path
+        self.table_name = table_name
+        self.id_col = id_col
+        self.word_col = word_col
+        self.token_id_col = token_id_col
+        self.chunk_size = chunk_size
 
-    重要: N-gram 等の文脈解析のために、必ず token_id 順でソートして取得する。
+    def __iter__(self) -> Iterator[list[str]]:
+        """
+        イテレーションのたびに新しい接続とカーソルを作成し、
+        先頭からデータを yield します。
+        """
+        # ここに、前回の corpus_reader 関数のロジックを移動します
+        with sqlite3.connect(self.db_path) as con:
+            try:
+                # MAX ID 取得
+                max_id_df = pd.read_sql(f"SELECT MAX({self.id_col}) FROM {self.table_name}", con)
+                max_id = max_id_df.iloc[0, 0]
+            except Exception:
+                return
+
+            if max_id is None:
+                return
+
+            # チャンク読み込み
+            for start_id in range(0, int(max_id) + 1, self.chunk_size):
+                end_id = start_id + self.chunk_size
+                
+                query = f"""
+                    SELECT {self.id_col}, {self.word_col}
+                    FROM {self.table_name}
+                    WHERE {self.id_col} >= {start_id} AND {self.id_col} < {end_id}
+                    ORDER BY {self.id_col}, {self.token_id_col}
+                """
+                
+                try:
+                    df_chunk = pd.read_sql(query, con)
+                except Exception:
+                    continue
+
+                if df_chunk.empty:
+                    continue
+
+                df_chunk = df_chunk.dropna(subset=[self.word_col])
+                if df_chunk.empty:
+                    continue
+
+                # グループ化して yield
+                groups = df_chunk.groupby(self.id_col, sort=False)[self.word_col].apply(list)
+                for tokens_list in groups:
+                    yield tokens_list
+
+# 既存コードとの互換性のため、関数名でクラスを呼び出せるようにエイリアスを設定
+# これにより corpus_reader(...) と書くだけでインスタンスが生成されます
+def corpus_reader(*args, **kwargs):
+    """
+    指定されたSQLiteデータベースから文書ごとにトークン列を読み込むイテラブル（反復可能オブジェクト）。
+    メモリを節約するために、chunk_size 単位でデータを取得し、1文書ずつ yield します。
+    Gensim のような複数回イテレーションが必要なライブラリにそのまま渡せます。
+
+    重要: N-gram 等の文脈解析のために、必ず token_id 順でソートして取得されます。
 
     Parameters
     ----------
@@ -1315,48 +1378,4 @@ def corpus_reader(
     list[str]
         1文書分のトークンリスト。
     """
-    with sqlite3.connect(db_path) as con:
-        # 文書IDの最大値を取得して、ループの範囲を決める
-        try:
-            # プレースホルダはテーブル名/列名には使えないため、f-stringを使用
-            max_id_df = pd.read_sql(f"SELECT MAX({id_col}) FROM {table_name}", con)
-            max_id = max_id_df.iloc[0, 0]
-        except Exception as e:
-            print(f"corpus_reader: Error reading max id from table '{table_name}': {e}")
-            return
-
-        if max_id is None:
-            return
-
-        # chunk_size ごとに範囲を区切って読み込む
-        for start_id in range(0, int(max_id) + 1, chunk_size):
-            end_id = start_id + chunk_size
-            
-            # ★修正: ORDER BY を追加して語順を保証
-            query = f"""
-                SELECT {id_col}, {word_col}
-                FROM {table_name}
-                WHERE {id_col} >= {start_id} AND {id_col} < {end_id}
-                ORDER BY {id_col}, {token_id_col}
-            """
-            
-            try:
-                df_chunk = pd.read_sql(query, con)
-            except Exception:
-                continue
-
-            if df_chunk.empty:
-                continue
-
-            # 欠損除去
-            df_chunk = df_chunk.dropna(subset=[word_col])
-            
-            if df_chunk.empty:
-                continue
-
-            # 文書IDごとにグループ化し、単語リストを作成して yield
-            # データは既にSQLでソート済みなので、そのままリスト化してOK
-            groups = df_chunk.groupby(id_col, sort=False)[word_col].apply(list)
-            
-            for tokens_list in groups:
-                yield tokens_list
+    return CorpusReader(*args, **kwargs)

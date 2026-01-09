@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Iterable, Optional, Tuple, List, Dict, Any
+from typing import Callable, Iterable, Iterator, Optional, Tuple, List, Dict, Any
 import pandas as pd
 import warnings
 from tqdm.auto import tqdm
@@ -91,6 +91,37 @@ def _normalize_stopwords(stopwords) -> set:
         result.add(str(stopwords))
         return result
 
+def _smart_split_text(text: str, max_length: int = 5000) -> Iterator[str]:
+    """
+    Sudachi の入力制限（約16,000文字 / 49KB）を回避するため、
+    指定文字数以内で安全な区切り文字（改行、句点）を探して分割するジェネレータ。
+    """
+    if not text:
+        return
+
+    while len(text) > max_length:
+        # 後ろの方（90%〜100%の位置）から区切り文字を探す
+        search_start = int(max_length * 0.9)
+        chunk_candidate = text[:max_length]
+        
+        split_idx = -1
+        # 優先順位: 改行 > 句点 > 読点
+        for delimiter in ["\n", "。", "、"]:
+            found = chunk_candidate.rfind(delimiter, search_start)
+            if found != -1:
+                # 区切り文字を含めてカット
+                split_idx = found + 1
+                break
+        
+        # 見つからなければ強制カット
+        if split_idx == -1:
+            split_idx = max_length
+            
+        yield text[:split_idx]
+        text = text[split_idx:]
+    
+    if text:
+        yield text
 
 # ----------------------------------------------------------------------
 # 公開ユーティリティ（tokenize 後の操作）
@@ -202,7 +233,6 @@ def tokenize_text_janome(
 
     return records
 
-
 # ----------------------------------------------------------------------
 # 1 テキスト用 tokenizer（Sudachi）
 # ----------------------------------------------------------------------
@@ -215,6 +245,8 @@ def tokenize_text_sudachi(
     word_form: Optional[str] = None,
     use_base_form: bool = True,
     extra_col: Optional[str] = "token_info",
+    # ★追加オプション: 明示的にオフにしたい場合用（デフォルトは安全のため True）
+    safe_split: bool = True,
 ) -> List[Tuple[str, str, Optional[Dict[str, Any]]]]:
     """
     SudachiPy による 1 テキスト分のトークナイズ
@@ -234,6 +266,9 @@ def tokenize_text_sudachi(
         True なら dictionary_form、False なら surface を返します。
     extra_col : str | None
         None の場合 token_info を作りません（高速化・軽量化したい場合）
+    safe_split : bool
+        True の場合、入力が長すぎる(>5000文字)際に自動で分割処理を行います。
+        Sudachi のバイト数制限エラーを防ぐための安全装置です。
 
     Returns
     -------
@@ -245,6 +280,23 @@ def tokenize_text_sudachi(
     s = str(text).strip()
     if s == "":
         return []
+
+    # 安全な分割処理 (Input is too long 対策)
+    if safe_split and len(s) > 5000:
+        all_records = []
+        # ヘルパー関数で分割し、再帰的に処理する
+        for chunk in _smart_split_text(s, max_length=5000):
+            chunk_records = tokenize_text_sudachi(
+                chunk,
+                tokenizer=tokenizer,
+                split_mode=split_mode,
+                word_form=word_form,
+                use_base_form=use_base_form,
+                extra_col=extra_col,
+                safe_split=False  # 無限再帰防止のため False に設定
+            )
+            all_records.extend(chunk_records)
+        return all_records
 
     try:
         from sudachipy import SplitMode
