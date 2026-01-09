@@ -1,15 +1,16 @@
 import sqlite3
 import pandas as pd
-from pathlib import Path
-from datetime import datetime
 import traceback
 import json
-from typing import Iterator
-
-# ===== 追加（新メソッド用。既存 import は変更しない） =====
 import time
-from typing import Callable, Optional, Sequence, Union, Generator, Iterable, Tuple
-# ===========================================================
+from __future__ import annotations
+from pathlib import Path
+from datetime import datetime
+from typing import Iterator, Literal, Union, Tuple
+from typing import (
+    Callable, Optional, Sequence, Union,
+    Generator, Iterator, Iterable, Tuple, Literal,
+)
 
 class CorpusDB:
     def __init__(self, db_path="corpus.db", master_db_path: Optional[str] = None):
@@ -1281,6 +1282,8 @@ class CorpusDB:
 # CorpusReader クラス
 # ----------------------------------------------------------------------
 
+ReturnMode = Literal["tokens", "id_tokens"]
+
 class CorpusReader:
     """
     SQLiteデータベースから文書をストリーミング読み込みするための Iterable クラス。
@@ -1294,7 +1297,8 @@ class CorpusReader:
         id_col: str = "doc_id",
         word_col: str = "word",
         token_id_col: str = "token_id",
-        chunk_size: int = 1000
+        chunk_size: int = 1000,
+        return_mode: ReturnMode = "tokens",
     ):
         self.db_path = db_path
         self.table_name = table_name
@@ -1302,35 +1306,37 @@ class CorpusReader:
         self.word_col = word_col
         self.token_id_col = token_id_col
         self.chunk_size = chunk_size
+        self.return_mode = return_mode
 
-    def __iter__(self) -> Iterator[list[str]]:
-        """
-        イテレーションのたびに新しい接続とカーソルを作成し、
-        先頭からデータを yield します。
-        """
-        # ここに、前回の corpus_reader 関数のロジックを移動します
+    def __iter__(self) -> Iterator[Union[list[str], Tuple[int, list[str]]]]:
         with sqlite3.connect(self.db_path) as con:
             try:
-                # MAX ID 取得
-                max_id_df = pd.read_sql(f"SELECT MAX({self.id_col}) FROM {self.table_name}", con)
-                max_id = max_id_df.iloc[0, 0]
+                # doc_id の範囲を取得（0空振り問題を回避）
+                df_range = pd.read_sql(
+                    f"SELECT MIN({self.id_col}) AS min_id, MAX({self.id_col}) AS max_id FROM {self.table_name}",
+                    con,
+                )
+                min_id = df_range.loc[0, "min_id"]
+                max_id = df_range.loc[0, "max_id"]
             except Exception:
                 return
 
-            if max_id is None:
+            if min_id is None or max_id is None:
                 return
 
-            # チャンク読み込み
-            for start_id in range(0, int(max_id) + 1, self.chunk_size):
+            min_id = int(min_id)
+            max_id = int(max_id)
+
+            for start_id in range(min_id, max_id + 1, self.chunk_size):
                 end_id = start_id + self.chunk_size
-                
+
                 query = f"""
                     SELECT {self.id_col}, {self.word_col}
                     FROM {self.table_name}
                     WHERE {self.id_col} >= {start_id} AND {self.id_col} < {end_id}
                     ORDER BY {self.id_col}, {self.token_id_col}
                 """
-                
+
                 try:
                     df_chunk = pd.read_sql(query, con)
                 except Exception:
@@ -1343,10 +1349,16 @@ class CorpusReader:
                 if df_chunk.empty:
                     continue
 
-                # グループ化して yield
                 groups = df_chunk.groupby(self.id_col, sort=False)[self.word_col].apply(list)
-                for tokens_list in groups:
-                    yield tokens_list
+
+                if self.return_mode == "tokens":
+                    for tokens_list in groups:
+                        yield tokens_list
+                else:
+                    # groups: index = doc_id, value = list[str]
+                    for doc_id, tokens_list in groups.items():
+                        yield int(doc_id), tokens_list
+
 
 # 既存コードとの互換性のため、関数名でクラスを呼び出せるようにエイリアスを設定
 # これにより corpus_reader(...) と書くだけでインスタンスが生成されます
@@ -1372,6 +1384,7 @@ def corpus_reader(*args, **kwargs):
         トークン順序を表すカラム名（既定: "token_id"）。
     chunk_size : int
         一度に読み込む文書IDの範囲（既定: 1000）。
+    return_mode
 
     Yields
     ------

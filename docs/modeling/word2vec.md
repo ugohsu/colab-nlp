@@ -34,7 +34,12 @@ db_path = "corpus.db"  # または Google Drive 上のパス
 
 # ジェネレータの作成
 # メモリには常に chunk_size (1000文書) 分しか展開されません
-sentences = corpus_reader(db_path, chunk_size=1000)
+# corpus_reader は Iterable（内部は CorpusReader クラス）を返す
+# gensim / Word2Vec は内部で複数回イテレーションする場合があるため、
+# 「一度消費したら終わり」の純ジェネレータではなく、
+# 何度でも安全に反復できる設計になっている
+
+sentences = corpus_reader("corpus.db", chunk_size=1000,)
 ```
 
 ---
