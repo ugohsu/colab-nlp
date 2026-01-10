@@ -90,7 +90,7 @@ fatal: destination path 'colab-common' already exists
 | **BoW** | N-gram（Nグラム）の集計と大規模データ対応 | [`docs/bow/ngram.md`](./docs/bow/ngram.md) |
 | **BoW / 可視化** | 共起ネットワーク分析による可視化 | [`docs/bow/network_graph.md`](./docs/bow/network_graph.md) |
 | **Modeling** | モデリング・ベクトル化（総論） | [`docs/modeling/README.md`](./docs/modeling/README.md) |
-| **Modeling** | Word2Vec による単語の分散表現 | [`docs/modeling/word2vec.md`](./docs/modeling/word2vec.md) |
+| **Modeling** | Word2Vec による単語の分散表現 | [`docs/modeling/word2vec.md`](./docs/modeling/word2vec.md), [`docs/modeling/word2vec_example_workflow.md`](./docs/modeling/word2vec_example_workflow.md) |
 | **Modeling** | Doc2Vec による文書・単語の分散表現 | [`docs/modeling/doc2vec.md`](./docs/modeling/doc2vec.md) |
 
 ---
