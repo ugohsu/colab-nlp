@@ -72,7 +72,7 @@ Transformerモデルも同様に、一つの単語をベクトル化する際に
 
 ## 4. `colab_nlp` での実装方針
 
-`colab_nlp` の `llm` モジュール (Comming Soon) では、Hugging Face Hub で公開されている**事前学習済みモデル（Pre-trained Models）** を利用します。
+`colab_nlp` の `llm` モジュール (Coming Soon) では、Hugging Face Hub で公開されている**事前学習済みモデル（Pre-trained Models）** を利用します。
 
 私たちは「学習（Training）」を一から行うのではなく、モデルが持つ高度な言語理解能力を借りて、手持ちのテキストを**「推論・変換（Inference/Encoding）」** することに注力します。これにより、少量のデータセットであっても、文脈を考慮した高度な分析が可能になります。
 
