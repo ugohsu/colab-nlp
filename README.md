@@ -89,9 +89,9 @@ fatal: destination path 'colab-common' already exists
 | **BoW / 可視化** | WordCloud による可視化 | [`docs/bow/wordcloud.md`](./docs/bow/wordcloud.md) |
 | **BoW** | N-gram（Nグラム）の集計と大規模データ対応 | [`docs/bow/ngram.md`](./docs/bow/ngram.md) |
 | **BoW / 可視化** | 共起ネットワーク分析による可視化 | [`docs/bow/network_graph.md`](./docs/bow/network_graph.md) |
-| **Modeling** | モデリング・ベクトル化（総論） | [`docs/embedding/README.md`](./docs/embedding/README.md) |
-| **Modeling** | Word2Vec による単語の分散表現 | [`docs/embedding/word2vec.md`](./docs/embedding/word2vec.md), [`docs/embedding/word2vec_example_workflow.md`](./docs/embedding/word2vec_example_workflow.md) |
-| **Modeling** | Doc2Vec による文書・単語の分散表現 | [`docs/embedding/doc2vec.md`](./docs/embedding/doc2vec.md) |
+| **Embedding** | 埋め込み・ベクトル化（総論） | [`docs/embedding/README.md`](./docs/embedding/README.md) |
+| **Embedding** | Word2Vec による単語の分散表現 | [`docs/embedding/word2vec.md`](./docs/embedding/word2vec.md), [`docs/embedding/word2vec_example_workflow.md`](./docs/embedding/word2vec_example_workflow.md) |
+| **Embedding** | Doc2Vec による文書・単語の分散表現 | [`docs/embedding/doc2vec.md`](./docs/embedding/doc2vec.md) |
 
 ---
 
@@ -154,13 +154,13 @@ fatal: destination path 'colab-common' already exists
 
 ---
 
-### 4. モデリング（ベクトル化）
+### 4. 埋め込み（ベクトル化）
 
 - 内容
     - テキストデータを分散表現に変換し、機械学習モデル（Word2Vec, Doc2Vec, LDAなど）を適用します。
     - 単語の意味計算、類似文書検索、トピック分類などが可能になります。
 - 参考資料
-    - モデリング総論
+    - 埋め込み表現総論
         - [`docs/embedding/README.md`](./docs/embedding/README.md)
     - Word2Vec
         - [`docs/embedding/word2vec.md`](./docs/embedding/word2vec.md)
