@@ -9,7 +9,7 @@
 
 ### BoW / TF-IDF との違い
 
-| 特徴 | BoW / TF-IDF (`docs/bow`) | モデリング / Embedding (`docs/modeling`) |
+| 特徴 | BoW / TF-IDF (`docs/bow`) | モデリング / Embedding (`docs/embedding`) |
 | :--- | :--- | :--- |
 | **基本原理** | 単語の**出現回数**を数える | 単語の**使われる文脈**を学習する |
 | **表現形式** | **疎ベクトル (Sparse)**<br>0 が多く、次元数は語彙数と同じ（数万〜） | **密ベクトル (Dense)**<br>実数が詰まっており、次元数は低い（100〜300） |
@@ -24,7 +24,6 @@
 | :--- | :--- | :--- | :--- |
 | **Word2Vec** | 単語 | 単語の意味をベクトル化。類義語検索や演算が可能。 | [`word2vec.md`](./word2vec.md), [`word2vec_example_workflow.md`](./word2vec_example_workflow.md)|
 | **Doc2Vec** | 文書 | 文書全体をベクトル化。類似文書検索やタグ推定に利用。 | [`doc2vec.md`](./doc2vec.md) |
-| **LDA** | 文書 | 確率モデルを用いて文書の「トピック（主題）」を推定。 | *(Coming Soon)* |
 
 ## 前提知識
 
