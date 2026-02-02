@@ -1,5 +1,5 @@
 """
-共起ネットワーク可視化ユーティリティ（オーソドックス版）
+共起ネットワーク可視化ユーティリティ（標準設定版）
 """
 
 import pandas as pd
@@ -18,22 +18,7 @@ def create_network_graph(
 ):
     """
     N-gram DataFrame から共起ネットワーク図を作成・表示・保存する。
-    独自の装飾を控え、NetworkX の標準的なスタイルで描画する。
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        compute_ngram の出力結果（"ngram", "count" 列を含むこと）。
-    head : int
-        上位何件のエッジ（ペア）を描画するか。
-    font_path : str
-        日本語フォントファイルのパス（必須）。
-    layout_seed : int
-        レイアウト（配置）の乱数シード。
-    figsize : tuple
-        描画領域のサイズ (width, height)。
-    save_path : str
-        保存先のファイルパス。
+    装飾指定を極力排除し、NetworkX のデフォルト設定で描画する。
     """
     
     # --- 1. データ準備 ---
@@ -42,7 +27,6 @@ def create_network_graph(
     if "ngram" not in df_sub.columns or "count" not in df_sub.columns:
         raise ValueError("DataFrame must contain 'ngram' and 'count' columns.")
 
-    # "A B" -> "source", "target" に分割
     try:
         split_df = df_sub["ngram"].str.split(" ", n=1, expand=True)
         df_sub["source"] = split_df[0]
@@ -54,11 +38,11 @@ def create_network_graph(
     G = nx.from_pandas_edgelist(df_sub, source="source", target="target")
 
     # --- 3. レイアウト計算 ---
-    # k: ノード間の反発力（標準的なヒューリスティック設定）
-    k = 0.5  
-    pos = nx.spring_layout(G, k=k, seed=layout_seed)
+    # k=0.5 はノード間の距離感のバランスが良い標準的な値のため維持推奨ですが、
+    # これも省いて pos = nx.spring_layout(G, seed=layout_seed) だけでも動作します。
+    pos = nx.spring_layout(G, k=0.5, seed=layout_seed)
 
-    # --- 4. フォント設定 ---
+    # --- 4. フォント設定 (日本語表示に必須) ---
     font_family = "sans-serif"
     if font_path:
         fm.fontManager.addfont(font_path)
@@ -67,22 +51,15 @@ def create_network_graph(
     else:
         print("Warning: font_path is not specified. Japanese characters may not display correctly.")
 
-    # --- 5. 描画 (オーソドックスな設定) ---
+    # --- 5. 描画 (最小限の設定) ---
     plt.figure(figsize=figsize)
     
+    # 色・サイズ・太さなどの指定を削除し、デフォルトに任せる
+    # ただし font_family だけは日本語の文字化けを防ぐために指定が必要
     nx.draw_networkx(
         G, pos,
         with_labels=True,
-        # 色・サイズ設定（落ち着いた標準的なものに固定）
-        node_color="lightblue",
-        edge_color="#CCCCCC",  # 薄いグレー
-        node_size=600,         # 固定サイズ
-        width=1.0,             # 固定幅
-        alpha=0.9,
-        # フォント設定
-        font_family=font_family,
-        font_size=11,
-        font_color="black"
+        font_family=font_family
     )
 
     plt.title(f"Co-occurrence Network (Top {head})")
