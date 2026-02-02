@@ -35,7 +35,8 @@ def create_network_graph(
         raise ValueError(f"Failed to split 'ngram'. Error: {e}")
 
     # --- 2. グラフ構築 ---
-    G = nx.from_pandas_edgelist(df_sub, source="source", target="target")
+    # edge_attr="count" を追加して、グラフデータ内に頻度情報を含めます
+    G = nx.from_pandas_edgelist(df_sub, source="source", target="target", edge_attr="count")
 
     # --- 3. レイアウト計算 ---
     # k=0.5 はノード間の距離感のバランスが良い標準的な値のため維持推奨ですが、
@@ -51,7 +52,18 @@ def create_network_graph(
     else:
         print("Warning: font_path is not specified. Japanese characters may not display correctly.")
 
-    # --- 5. 描画 (最小限の設定) ---
+    # --- 5. 描画設定 ---
+    # エッジの太さを計算（そのままだと太すぎる場合があるため、最大5px程度に調整）
+    # リスト内包表記で、エッジごとの count を取り出します
+    weights = [d["count"] for u, v, d in G.edges(data=True)]
+    
+    if weights:
+        max_weight = max(weights)
+        # 最小1.0, 最大5.0 程度になるように計算 (あくまで一例です)
+        widths = [(w / max_weight) * 4 + 1.0 for w in weights]
+    else:
+        widths = 1.0
+
     plt.figure(figsize=figsize)
     
     nx.draw_networkx(
@@ -61,6 +73,7 @@ def create_network_graph(
         node_color="lightblue",
         edge_color="#CCCCCC",  # 薄いグレー
         alpha=0.9,
+        width=widths,
         font_family=font_family
     )
 
