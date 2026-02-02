@@ -54,11 +54,13 @@ def create_network_graph(
     # --- 5. 描画 (最小限の設定) ---
     plt.figure(figsize=figsize)
     
-    # 色・サイズ・太さなどの指定を削除し、デフォルトに任せる
-    # ただし font_family だけは日本語の文字化けを防ぐために指定が必要
     nx.draw_networkx(
         G, pos,
         with_labels=True,
+        # 色・サイズ設定（落ち着いた標準的なものに固定）
+        node_color="lightblue",
+        edge_color="#CCCCCC",  # 薄いグレー
+        alpha=0.9,
         font_family=font_family
     )
 
