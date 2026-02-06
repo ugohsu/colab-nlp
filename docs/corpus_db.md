@@ -111,13 +111,14 @@ work_db.sync_status_from_master()
 Work DB に対して解析を実行します。テキストデータは Master から読み込まれ、トークンは Work に保存されます。
 
 ```python
+!pip install sudachipy sudachidict_full
 from sudachipy import dictionary
 from colab_nlp import tokenize_text_sudachi
 
-# 1. Full辞書を指定して Tokenizer を作成
+# 1. (例) Full辞書を指定して Tokenizer を作成
 full_tokenizer = dictionary.Dictionary(dict="full").create()
 
-# 2. 形態素解析用の関数を定義
+# 2. (例) 形態素解析用の関数を定義
 #    Sudachi 固有の調整（辞書・語形・分割モード）を行いたい場合は
 #    以下のように tokenize_text_fn を使って詳細を指定します。
 def new_tokenizer(df):
