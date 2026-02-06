@@ -395,49 +395,100 @@ class CorpusDB:
         # 【修正】実際に処理した件数を返す
         return len(data_text)
 
-    def ingest_queue(self):
+    def ingest_queue(self, check_updates: bool = True, batch_size: int = 100):
         """
         【Phase 1: Ingest】
-        status_fetch が未完了(fetch_ok=0)のファイルを読み込み、DB（textテーブル）に保存する。
-        形態素解析は行わない。
+        ファイルを読み込み、DB（textテーブル）に保存する。
+        
+        対象:
+          1. status_fetch.fetch_ok = 0 の文書（未取得）
+          2. check_updates=True の場合、ファイル更新日時 > DB取得日時 の文書（更新あり）
         
         Note:
-            テキスト更新に伴い、status_tokenize.tokenize_ok を 0 にリセットする。
-            これにより、次回の tokenize_stored_text() で再解析が行われる。
+          - imported:// などの仮想パスは除外する。
+          - テキスト更新時は、status_tokenize.tokenize_ok を 0 にリセットする。
+          - まとめてコミットするため高速。
         """
+        
+        # 1. 対象の抽出 (SQLではパスフィルタのみ行い、Logicで振り分ける)
+        # Note: 仮想パス除外は 'imported://%' に緩和（file:// 等の利用可能性を考慮）
         with self._connect() as con:
-            # imported:// などの仮想パスを除外し、実ファイルのみ対象とする
             query = f"""
-                SELECT sf.doc_id, d.abs_path
+                SELECT sf.doc_id, d.abs_path, sf.fetch_ok, sf.fetched_at
                 FROM {self.t_status_fetch} sf
                 JOIN {self.t_docs} d ON sf.doc_id = d.doc_id
-                WHERE sf.fetch_ok = 0
-                  AND d.abs_path NOT LIKE '%://%'
+                WHERE d.abs_path NOT LIKE 'imported://%'
                 ORDER BY sf.doc_id
             """
-            targets = pd.read_sql(query, con).to_dict(orient="records")
+            # targets = pd.read_sql(query, con).to_dict(orient="records")
+            candidates = pd.read_sql(query, con).to_dict(orient="records")
 
-        total = len(targets)
-        print(f"Ingesting {total} documents...")
+        if not candidates:
+            print("No file candidates found.")
+            return
 
-        for i, row in enumerate(targets, start=1):
+        # 2. 処理対象の選定
+        targets = []
+        for row in candidates:
             doc_id = row["doc_id"]
             path_str = row["abs_path"]
+            fetch_ok = row["fetch_ok"]
+            fetched_at_str = row["fetched_at"]
 
-            try:
-                # ファイル読み込み
-                text = Path(path_str).read_text(encoding="utf-8", errors="strict")
+            should_ingest = False
+            
+            # Case A: 未取得
+            if fetch_ok == 0:
+                should_ingest = True
+            
+            # Case B: 取得済みだが更新チェック (仕様B)
+            elif check_updates and fetch_ok == 1:
+                if not os.path.exists(path_str):
+                    continue # ファイルが消えている場合はスキップ（あるいはエラー記録）
                 
-                with self._connect() as con:
+                try:
+                    mtime = os.path.getmtime(path_str)
+                    # DBの時刻と比較
+                    if not fetched_at_str:
+                        should_ingest = True
+                    else:
+                        # ISO format -> timestamp
+                        db_ts = datetime.fromisoformat(fetched_at_str).timestamp()
+                        # ファイルの方が新しい場合 (マージン 1秒)
+                        if mtime > db_ts + 1.0:
+                            should_ingest = True
+                except Exception:
+                    should_ingest = True
+            
+            if should_ingest:
+                targets.append(row)
+
+        if not targets:
+            print("No documents need ingestion.")
+            return
+
+        print(f"Ingesting {len(targets)} documents (check_updates={check_updates})...")
+
+        # 3. バッチ処理実行
+        # コネクションをループ外で作ることで高速化（性能改善）
+        with self._connect() as con:
+            count = 0
+            
+            for i, row in enumerate(targets, start=1):
+                doc_id = row["doc_id"]
+                path_str = row["abs_path"]
+                
+                try:
+                    text = Path(path_str).read_text(encoding="utf-8", errors="strict")
                     now = datetime.now().isoformat()
                     
-                    # 1. text テーブルへ保存
+                    # (1) text 保存
                     con.execute(
                         f"INSERT OR REPLACE INTO {self.t_text} (doc_id, char_count, text) VALUES (?, ?, ?)",
                         (doc_id, len(text), text)
                     )
                     
-                    # 2. status_fetch 更新 (fetch_ok=1)
+                    # (2) status_fetch 更新 (fetch_ok=1)
                     con.execute(
                         f"""
                         UPDATE {self.t_status_fetch} 
@@ -447,8 +498,7 @@ class CorpusDB:
                         (now, now, doc_id),
                     )
                     
-                    # 3. 【追加】status_tokenize リセット (tokenize_ok=0)
-                    #    テキストが変わったため、再解析待ちにする
+                    # (3) status_tokenize リセット (再解析待ちにする)
                     con.execute(
                         f"""
                         UPDATE {self.t_status_tokenize}
@@ -458,18 +508,28 @@ class CorpusDB:
                         (now, doc_id),
                     )
                     
+                    count += 1
+                    
+                except Exception as e:
+                    print(f"Error ingesting doc_id={doc_id} ({path_str}): {e}")
+                    # エラー記録
+                    msg = "".join(traceback.format_exception(None, e, e.__traceback__))
+                    now_err = datetime.now().isoformat()
+                    con.execute(
+                        f"UPDATE {self.t_status_fetch} SET error_message = ?, updated_at = ? WHERE doc_id = ?",
+                        (msg, now_err, doc_id)
+                    )
+
+                # バッチコミット
+                if i % batch_size == 0:
                     con.commit()
+                    print(f"Ingest progress: {i}/{len(targets)} done.")
 
-            except Exception as e:
-                print(f"Error ingesting doc_id={doc_id} ({path_str}): {e}")
-                self._log_error(doc_id, e, stage="fetch")
+            con.commit() # 残りをコミット
 
-            if i % 100 == 0:
-                print(f"Ingest progress: {i}/{total} done.")
+        print(f"Ingestion queue finished. {count} files processed.")
 
-        print("Ingestion queue finished.")
-
-    def process_queue(self, tokenize_fn=None, *, fetch_only: bool = False):
+    def process_queue(self, tokenize_fn=None, *, fetch_only: bool = False, check_updates: bool = True):
         """
         [Wrapper] 未処理のファイルを取り込み(Ingest)、必要ならトークン化(Tokenize)を一括で行う。
         
@@ -481,9 +541,11 @@ class CorpusDB:
             tokens DataFrame を返す関数。
         fetch_only : bool
             True の場合、テキスト読み込みとDB保存だけ行い、形態素解析はスキップする。
+        check_updates: bool
+            Trueなら更新されたファイルも再取得する (Spec B)
         """
         # 1. Ingest (未取得ファイルの読み込み)
-        self.ingest_queue()
+        self.ingest_queue(check_updates=check_updates)
 
         if fetch_only:
             return
@@ -629,6 +691,10 @@ class CorpusDB:
         """
         【Phase 2: Tokenize】
         DB内のテキスト(fetch_ok=1)のうち、未解析(tokenize_ok=0) または指定された文書をトークン化する。
+        
+        Note:
+            doc_ids を指定した場合は、tokenize_ok の状態に関わらず強制的に再解析を行う。
+            指定しない場合は、未解析(tokenize_ok=0)のみを対象とする。
         """
 
         with self._connect() as con:
@@ -662,7 +728,6 @@ class CorpusDB:
                     JOIN {self.t_status_fetch} sf ON sf.doc_id = st.doc_id
                     JOIN {self.t_text} t ON t.doc_id = st.doc_id
                     WHERE sf.fetch_ok = 1
-                      AND st.tokenize_ok = 0
                       AND st.doc_id IN ({ph})
                     ORDER BY st.doc_id
                     """,
