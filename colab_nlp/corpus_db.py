@@ -395,9 +395,65 @@ class CorpusDB:
         # 【修正】実際に処理した件数を返す
         return len(data_text)
 
+    def ingest_queue(self):
+        """
+        【Phase 1: Ingest】
+        status_fetch が未完了(fetch_ok=0)のファイルを読み込み、DB（textテーブル）に保存する。
+        形態素解析は行わない。
+        """
+        with self._connect() as con:
+            # imported:// などの仮想パスを除外し、実ファイルのみ対象とする
+            query = f"""
+                SELECT sf.doc_id, d.abs_path
+                FROM {self.t_status_fetch} sf
+                JOIN {self.t_docs} d ON sf.doc_id = d.doc_id
+                WHERE sf.fetch_ok = 0
+                  AND d.abs_path NOT LIKE '%://%'
+                ORDER BY sf.doc_id
+            """
+            targets = pd.read_sql(query, con).to_dict(orient="records")
+
+        total = len(targets)
+        print(f"Ingesting {total} documents...")
+
+        for i, row in enumerate(targets, start=1):
+            doc_id = row["doc_id"]
+            path_str = row["abs_path"]
+
+            try:
+                # ファイル読み込み
+                text = Path(path_str).read_text(encoding="utf-8", errors="strict")
+                
+                with self._connect() as con:
+                    now = datetime.now().isoformat()
+                    # text テーブルへ保存
+                    con.execute(
+                        f"INSERT OR REPLACE INTO {self.t_text} (doc_id, char_count, text) VALUES (?, ?, ?)",
+                        (doc_id, len(text), text)
+                    )
+                    # status_fetch 更新 (fetch_ok=1)
+                    con.execute(
+                        f"""
+                        UPDATE {self.t_status_fetch} 
+                        SET fetched_at = ?, fetch_ok = 1, updated_at = ?, error_message = NULL
+                        WHERE doc_id = ?
+                        """,
+                        (now, now, doc_id),
+                    )
+                    con.commit()
+
+            except Exception as e:
+                print(f"Error ingesting doc_id={doc_id} ({path_str}): {e}")
+                self._log_error(doc_id, e, stage="fetch")
+
+            if i % 100 == 0:
+                print(f"Ingest progress: {i}/{total} done.")
+
+        print("Ingestion queue finished.")
+
     def process_queue(self, tokenize_fn=None, *, fetch_only: bool = False):
         """
-        未処理のファイルを順次処理するメインループ。
+        [Wrapper] 未処理のファイルを取り込み(Ingest)、必要ならトークン化(Tokenize)を一括で行う。
         
         Parameters
         ----------
@@ -408,218 +464,17 @@ class CorpusDB:
         fetch_only : bool
             True の場合、テキスト読み込みとDB保存だけ行い、形態素解析はスキップする。
         """
-        if not fetch_only and tokenize_fn is None:
-            raise ValueError("tokenize_fn must be provided unless fetch_only=True")
+        # 1. Ingest (未取得ファイルの読み込み)
+        self.ingest_queue()
 
-        # 未処理の doc_id を取得
-        # fetch_only=True なら「未取得(fetch_ok=0)」を対象にする
-        # fetch_only=False なら「未解析(tokenize_ok=0)」を対象にする（取得済み未解析も含む）
-        # status_fetch / status_tokenize に分割
         if fetch_only:
-            target_condition = "sf.fetch_ok = 0"
-        else:
-            target_condition = "st.tokenize_ok = 0"
-
-        with self._connect() as con:
-            # 【修正】imported:// などの仮想パスを対象外にするフィルタを追加
-            #  process_queue はファイル読み込みを伴うため、実ファイル以外は処理してはならない
-            # 【A案対応】file:// も含め、スキーム(://)を持つパスは一律除外する（シンプル化）
-            if fetch_only:
-                query = f"""
-                    SELECT sf.doc_id 
-                    FROM {self.t_status_fetch} sf
-                    JOIN {self.t_docs} d ON sf.doc_id = d.doc_id
-                    WHERE {target_condition}
-                      AND d.abs_path NOT LIKE '%://%'
-                    ORDER BY sf.doc_id
-                """
-            else:
-                query = f"""
-                    SELECT st.doc_id 
-                    FROM {self.t_status_tokenize} st
-                    JOIN {self.t_docs} d ON st.doc_id = d.doc_id
-                    WHERE {target_condition}
-                      AND d.abs_path NOT LIKE '%://%'
-                    ORDER BY st.doc_id
-                """
-            target_ids = pd.read_sql(query, con)["doc_id"].tolist()
-
-        total = len(target_ids)
-        print(f"Processing {total} documents (fetch_only={fetch_only})...")
-
-        for i, doc_id in enumerate(target_ids, start=1):
-            try:
-                self._process_one(doc_id, tokenize_fn, fetch_only=fetch_only)
-                if i % 100 == 0:
-                    print(f"Progress: {i}/{total} done.")
-            except Exception as e:
-                print(f"Error at doc_id={doc_id}: {e}")
-                # エラー情報をDBに記録（fetch_only or IOError は fetch 側、その他は tokenize 側）
-                stage = "fetch" if fetch_only or isinstance(e, IOError) else "tokenize"
-                self._log_error(doc_id, e, stage=stage)
-
-        print("Queue processing finished.")
-
-    def _process_one(self, doc_id, tokenize_fn, fetch_only=False):
-        """1文書に対する処理（読込 -> [解析] -> 保存）"""
-        
-        # 1. パスを取得（都度接続）
-        with self._connect() as con:
-            row = con.execute(
-                f"SELECT abs_path FROM {self.t_docs} WHERE doc_id = ?", (doc_id,)
-            ).fetchone()
-        
-        if not row:
-            return # IDが存在しない場合
-            
-        path_str = row[0]
-        
-        # ============================================================
-        # 【追加】誤って process_queue を呼んだ場合のガード (Safety Hook)
-        # ============================================================
-        # インポート機能で登録されたパス (例: imported://...) は実ファイルではないため、
-        # process_queue (ファイル読み込み) ではなく reprocess_tokens (DB内テキスト利用) を使う必要があります。
-        # ※ SQL側で除外しているため通常ここには来ないが、個別に呼んだ場合などの安全策として残す
-        if "://" in path_str:
-            raise ValueError(
-                f"Virtual path detected: '{path_str}'\n"
-                "This document was imported directly from DB/DataFrame and has no physical file.\n"
-                "Please use `db.reprocess_tokens()` instead of `db.process_queue()`."
-            )
-        # ============================================================
-
-        # 2. ファイル読み込み
-        try:
-            text = Path(path_str).read_text(encoding="utf-8", errors="strict")
-        except Exception as e:
-            raise IOError(f"Failed to read file: {path_str}") from e
-
-        # ===== 追加: fetch_only の場合 =====
-        if fetch_only:
-            with self._connect() as con:
-                now = datetime.now().isoformat()
-                # text テーブルへ保存
-                con.execute(
-                    f"INSERT OR REPLACE INTO {self.t_text} (doc_id, char_count, text) VALUES (?, ?, ?)",
-                    (doc_id, len(text), text)
-                )
-                # status_fetch 更新 (fetch_ok=1)
-                con.execute(
-                    f"""
-                    UPDATE {self.t_status_fetch} 
-                    SET fetched_at = ?, fetch_ok = 1, updated_at = ?, error_message = NULL
-                    WHERE doc_id = ?
-                    """,
-                    (now, now, doc_id),
-                )
-                con.commit()
             return
-        # ===================================
 
-        # 3. 形態素解析用 DataFrame 作成
-        # colab-nlp の tokenize_df は 'text' 列と ID列 を期待する
-        df_input = pd.DataFrame([{
-            "doc_id": doc_id,
-            "text": text
-        }])
-
-        # 4. 解析実行（外部関数）
-        df_tokens = tokenize_fn(df_input)
-
-        # 【対策1】None返却時の安全策：Noneならエラーとして扱い、ログに残す
-        if df_tokens is None:
-            raise ValueError(f"tokenize_fn returned None for doc_id={doc_id}. Expected DataFrame.")
-
-        # 【追加対策】型チェック：DataFrame以外が返ってきたらエラーにする
-        if not isinstance(df_tokens, pd.DataFrame):
-            raise TypeError(
-                f"tokenize_fn must return pandas.DataFrame, got {type(df_tokens).__name__} for doc_id={doc_id}"
-            )
-
-        if not df_tokens.empty:
-            # 【追加対策】doc_id の強制上書き（関数の実装ミスによるIDズレ・欠損を防止）
-            df_tokens["doc_id"] = doc_id
-
-            # 【対策2】必須カラムチェック：token_id, word が存在し、欠損していないこと
-            if "token_id" not in df_tokens.columns:
-                raise ValueError(f"tokenize_fn must return 'token_id' column for doc_id={doc_id}")
-            if df_tokens["token_id"].isna().any():
-                raise ValueError(f"token_id contains NA for doc_id={doc_id}")
+        # 2. Tokenize (保存済みテキストのトークン化)
+        if tokenize_fn is None:
+            raise ValueError("tokenize_fn must be provided unless fetch_only=True")
             
-            if "word" not in df_tokens.columns:
-                raise ValueError(f"tokenize_fn must return 'word' column for doc_id={doc_id}")
-
-            # 【対策3】二重エンコード防止：文字列でない場合のみ json.dumps する
-            if "token_info" in df_tokens.columns:
-                def safe_json_dumps(x):
-                    if x is None:
-                        return None
-                    if isinstance(x, str):
-                        return x  # すでに文字列ならそのまま
-                    return json.dumps(x, ensure_ascii=False)
-
-                df_tokens["token_info"] = df_tokens["token_info"].apply(safe_json_dumps)
-            else:
-                df_tokens["token_info"] = None
-
-            # 【対策4】想定外カラムの除外：テーブル定義にあるカラムだけに絞る
-            valid_cols = ["doc_id", "token_id", "word", "pos", "token_info"]
-            # 存在しない列は None で埋める
-            for col in valid_cols:
-                if col not in df_tokens.columns:
-                    df_tokens[col] = None
-            # 必要な列だけ抽出
-            df_tokens = df_tokens[valid_cols]
-
-            # 【対策5】重複チェック：(doc_id, token_id) が重複していたらエラーにする
-            if df_tokens.duplicated(subset=["doc_id", "token_id"]).any():
-                 raise ValueError(f"Duplicate token_id detected for doc_id={doc_id}.")
-        
-        # 5. 結果の保存（まとめてトランザクション）
-        with self._connect() as con:
-            now = datetime.now().isoformat()
-
-            # text テーブルへ保存
-            con.execute(
-                f"INSERT OR REPLACE INTO {self.t_text} (doc_id, char_count, text) VALUES (?, ?, ?)",
-                (doc_id, len(text), text)
-            )
-
-            # tokens テーブルへ保存
-            # 再実行時の重複防止：先に既存のトークンを消す（空トークン時も残留させない）
-            con.execute(f"DELETE FROM {self.t_tokens} WHERE doc_id = ?", (doc_id,))
-            
-            if not df_tokens.empty:
-                df_tokens.to_sql(
-                    self.t_tokens,
-                    con,
-                    if_exists="append",
-                    index=False,
-                    method="multi", 
-                    chunksize=5000
-                )
-
-            # status_fetch（fetch 成功）を更新
-            con.execute(
-                f"""
-                UPDATE {self.t_status_fetch}
-                SET fetched_at = ?, fetch_ok = 1, updated_at = ?, error_message = NULL
-                WHERE doc_id = ?
-                """,
-                (now, now, doc_id),
-            )
-
-            # status_tokenize（tokenize 成功）を更新
-            con.execute(
-                f"""
-                UPDATE {self.t_status_tokenize}
-                SET tokenize_ok = 1, updated_at = ?, error_message = NULL
-                WHERE doc_id = ?
-                """,
-                (now, doc_id),
-            )
-            
-            con.commit()
+        self.tokenize_stored_text(tokenize_fn)
 
     def _log_error(self, doc_id, exception, *, stage: str = "tokenize"):
         """エラー発生時のログ記録（stage: 'fetch' or 'tokenize'）"""
@@ -742,7 +597,7 @@ class CorpusDB:
 
         print("Reset complete. Ready to reprocess.")
 
-    def reprocess_tokens(
+    def tokenize_stored_text(
         self,
         tokenize_fn: Callable[[pd.DataFrame], pd.DataFrame],
         *,
@@ -754,7 +609,8 @@ class CorpusDB:
         fallback_to_single: bool = True,
     ):
         """
-        tokenize_ok=0 の文書を char_count ベースで batch 再解析する。
+        【Phase 2: Tokenize】
+        DB内のテキスト(fetch_ok=1)のうち、未解析(tokenize_ok=0) または指定された文書をトークン化する。
         """
 
         with self._connect() as con:
@@ -866,7 +722,14 @@ class CorpusDB:
                 )
                 last_print = now
 
-        print("Reprocessing finished.")
+        print("Tokenization finished.")
+
+    def reprocess_tokens(self, *args, **kwargs):
+        """
+        [Wrapper] 互換性維持のためのエイリアス。
+        tokenize_stored_text を呼び出します。
+        """
+        return self.tokenize_stored_text(*args, **kwargs)
 
     def _reprocess_batch(self, batch_df: pd.DataFrame, tokenize_fn):
         """複数文書をまとめて tokenize して保存"""
