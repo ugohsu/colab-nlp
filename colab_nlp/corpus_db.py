@@ -400,6 +400,10 @@ class CorpusDB:
         【Phase 1: Ingest】
         status_fetch が未完了(fetch_ok=0)のファイルを読み込み、DB（textテーブル）に保存する。
         形態素解析は行わない。
+        
+        Note:
+            テキスト更新に伴い、status_tokenize.tokenize_ok を 0 にリセットする。
+            これにより、次回の tokenize_stored_text() で再解析が行われる。
         """
         with self._connect() as con:
             # imported:// などの仮想パスを除外し、実ファイルのみ対象とする
@@ -426,12 +430,14 @@ class CorpusDB:
                 
                 with self._connect() as con:
                     now = datetime.now().isoformat()
-                    # text テーブルへ保存
+                    
+                    # 1. text テーブルへ保存
                     con.execute(
                         f"INSERT OR REPLACE INTO {self.t_text} (doc_id, char_count, text) VALUES (?, ?, ?)",
                         (doc_id, len(text), text)
                     )
-                    # status_fetch 更新 (fetch_ok=1)
+                    
+                    # 2. status_fetch 更新 (fetch_ok=1)
                     con.execute(
                         f"""
                         UPDATE {self.t_status_fetch} 
@@ -440,6 +446,18 @@ class CorpusDB:
                         """,
                         (now, now, doc_id),
                     )
+                    
+                    # 3. 【追加】status_tokenize リセット (tokenize_ok=0)
+                    #    テキストが変わったため、再解析待ちにする
+                    con.execute(
+                        f"""
+                        UPDATE {self.t_status_tokenize}
+                        SET tokenize_ok = 0, updated_at = ?, error_message = NULL
+                        WHERE doc_id = ?
+                        """,
+                        (now, doc_id),
+                    )
+                    
                     con.commit()
 
             except Exception as e:
