@@ -100,26 +100,46 @@ class CorpusDB:
             """)
 
             # 2. status_fetch（fetch のみ）
-            con.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.t_status_fetch} (
-                    doc_id INTEGER PRIMARY KEY,
-                    fetched_at TEXT,
-                    fetch_ok INTEGER DEFAULT 0,
-                    error_message TEXT,
-                    updated_at TEXT,
-                    FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
-                );
-            """)
+            if self.master_db_path:
+                con.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.t_status_fetch} (
+                        doc_id INTEGER PRIMARY KEY,
+                        fetched_at TEXT,
+                        fetch_ok INTEGER DEFAULT 0,
+                        error_message TEXT,
+                        updated_at TEXT
+                    );
+                """)
+            else:
+                con.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.t_status_fetch} (
+                        doc_id INTEGER PRIMARY KEY,
+                        fetched_at TEXT,
+                        fetch_ok INTEGER DEFAULT 0,
+                        error_message TEXT,
+                        updated_at TEXT,
+                        FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
+                    );
+                """)
 
             # 3. text
-            con.execute(f"""
-                CREATE TABLE IF NOT EXISTS {self.t_text} (
-                    doc_id INTEGER PRIMARY KEY,
-                    char_count INTEGER,
-                    text TEXT,
-                    FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
-                );
-            """)
+            if self.master_db_path:
+                con.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.t_text} (
+                        doc_id INTEGER PRIMARY KEY,
+                        char_count INTEGER,
+                        text TEXT
+                    );
+                """)
+            else:
+                con.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.t_text} (
+                        doc_id INTEGER PRIMARY KEY,
+                        char_count INTEGER,
+                        text TEXT,
+                        FOREIGN KEY(doc_id) REFERENCES documents(doc_id)
+                    );
+                """)
 
             # ----------------------------
             # Work側（tokens/status_tokenize）
@@ -737,7 +757,7 @@ class CorpusDB:
                 )
 
         if df.empty:
-            print("No documents to reprocess.")
+            print("No documents to tokenize.")
             return
 
         df["char_count"] = df["char_count"].fillna(0).astype(int)
@@ -750,7 +770,7 @@ class CorpusDB:
         )
 
         print(
-            f"Starting reprocess: {total_docs} docs / {total_chars:,} chars "
+            f"Starting tokenization: {total_docs} docs / {total_chars:,} chars "
             f"in {len(batches)} batches"
         )
 
