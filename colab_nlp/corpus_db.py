@@ -8,7 +8,6 @@ import json
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import Iterator, Literal, Union, Tuple
 from typing import (
     Callable, Optional, Sequence, Union,
     Generator, Iterator, Iterable, Tuple, Literal,
@@ -597,6 +596,7 @@ class CorpusDB:
         """
         [Splitモード用] Master DB の情報を基に Work DB の status_tokenize を初期化する。
         既存の Master DB に対して、新規に Work DB を作成した場合などに使用する。
+        splitで新規work DBを作ったら sync_status_from_master() を最初に実行する。
         """
         if not self.master_db_path:
             print("This method is for split mode (master_db_path) only.")
