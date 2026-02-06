@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 import pandas as pd
 import traceback
@@ -405,19 +406,19 @@ class CorpusDB:
           2. check_updates=True の場合、ファイル更新日時 > DB取得日時 の文書（更新あり）
         
         Note:
-          - imported:// などの仮想パスは除外する。
+          - URIスキームを含むパス（imported://, file:// 等）は除外する。
           - テキスト更新時は、status_tokenize.tokenize_ok を 0 にリセットする。
           - まとめてコミットするため高速。
         """
         
         # 1. 対象の抽出 (SQLではパスフィルタのみ行い、Logicで振り分ける)
-        # Note: 仮想パス除外は 'imported://%' に緩和（file:// 等の利用可能性を考慮）
+        # Note: 安全のため、スキーム(://)を持つパスは一律除外する（file://への対応は未実装のため）
         with self._connect() as con:
             query = f"""
                 SELECT sf.doc_id, d.abs_path, sf.fetch_ok, sf.fetched_at
                 FROM {self.t_status_fetch} sf
                 JOIN {self.t_docs} d ON sf.doc_id = d.doc_id
-                WHERE d.abs_path NOT LIKE 'imported://%'
+                WHERE d.abs_path NOT LIKE '%://%'
                 ORDER BY sf.doc_id
             """
             # targets = pd.read_sql(query, con).to_dict(orient="records")
