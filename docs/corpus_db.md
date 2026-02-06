@@ -139,7 +139,9 @@ work_db.tokenize_stored_text(new_tokenizer)
 
 ---
 
-## 分析用データの抽出 (Filter)
+## データの利用・分析
+
+### 1. 分析用データの抽出 (Filter)
 
 解析が完了したデータベース（Full DB）はサイズが大きくなりがちです。Word2Vec や LDA などの学習に必要な情報だけを抽出し、軽量なデータベースを作成します。
 
@@ -157,6 +159,49 @@ work_db.export_filtered_tokens_db(
 ```
 
 作成された `analysis_ready.db` はサイズが小さく、分析フェーズでの読み込みが高速になります。
+
+### 2. Python (Gensim など) での利用
+
+`corpus_reader` を使うと、メモリを節約しながらトークン列をジェネレータとして取得できます。word2vec などの学習に適しています。
+
+```python
+from colab_nlp import corpus_reader
+
+# 1文書ずつ ['私', 'は', ...] のリストを返すジェネレータ
+sentences = corpus_reader(db_path)
+
+# Word2Vec の学習例
+# from gensim.models import Word2Vec
+# model = Word2Vec(sentences, vector_size=100, window=5, min_count=5)
+
+```
+
+### 3. 大規模データの高速集計 (DuckDB / Parquet)
+
+1億レコードを超えるような大規模データの場合、SQLite での集計は時間がかかります。 DuckDB と Parquet を組み合わせることで、高速化（数分→数秒）と容量削減（1/10〜1/100）が可能です。
+
+```python
+!pip install duckdb
+import duckdb
+
+# 1. SQLite から Parquet への変換（初回のみ）
+con = duckdb.connect()
+con.execute("INSTALL sqlite; LOAD sqlite;")
+con.execute(f"""
+    COPY (SELECT * FROM sqlite_scan('{db_path}', 'tokens'))
+    TO 'tokens.parquet' (FORMAT 'PARQUET', CODEC 'ZSTD');
+""")
+
+# 2. Parquet を使った集計
+df_result = con.sql("""
+    SELECT pos, COUNT(*) as count 
+    FROM 'tokens.parquet' 
+    GROUP BY pos 
+    ORDER BY count DESC
+""").df()
+print(df_result)
+
+```
 
 ---
 
